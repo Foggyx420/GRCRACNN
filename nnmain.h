@@ -11,7 +11,6 @@ public:
 
 private:
     bool isnnparticipant();
-    bool processprojectdata();
 };
 
 #endif // NNMAIN_H

@@ -4,8 +4,18 @@
 #include "nndownload.h"
 #include "nnutil.h"
 
+#include <boost/exception/exception.hpp>
+#include <boost/exception/diagnostic_information.hpp>
+#include <boost/iostreams/filtering_stream.hpp>
+#include <boost/iostreams/copy.hpp>
+#include <boost/iostreams/filter/gzip.hpp>
+#include <zlib.h>
+#include <unordered_set>
+
 // Dummy testing
 std::vector<std::pair<std::string, std::string>> vWhitelist;
+std::unordered_set<std::string> mCPIDs;
+
 std::vector<std::string> vCPIDs;
 void setdummy();
 bool IsNeuralParticipant();
@@ -13,16 +23,18 @@ bool IsNeuralParticipant();
 void setdummy()
 {
     // Dummy CPIDs -- In live network conditions the cpids and whitelist are in cache
-    vCPIDs.push_back("f636448e64b48e26aaf610a48a48bb91");
-    vCPIDs.push_back("0b5ef259411ec18e8dac2be0b732fd23");
-    vCPIDs.push_back("a92e1cf0903633d62283ea1f101a1af3");
-    vCPIDs.push_back("af73cd19f79a0ade8e6ef695faa2c776");
-    vCPIDs.push_back("55cd02be28521073d367f7ca38615682");
+    mCPIDs.insert("f636448e64b48e26aaf610a48a48bb91");
+    mCPIDs.insert("0b5ef259411ec18e8dac2be0b732fd23");
+    mCPIDs.insert("a92e1cf0903633d62283ea1f101a1af3");
+    mCPIDs.insert("af73cd19f79a0ade8e6ef695faa2c776");
+    mCPIDs.insert("55cd02be28521073d367f7ca38615682");
     vWhitelist.push_back(std::make_pair("enigma@home", "http://www.enigmaathome.net/@"));
     vWhitelist.push_back(std::make_pair("odlk1", "https://boinc.multi-pool.info/latinsquares/@"));
     vWhitelist.push_back(std::make_pair("sztaki", "http://szdg.lpds.sztaki.hu/szdg/@"));
     return;
 }
+
+namespace boostio = boost::iostreams;
 
 // Classes, etc
 class nndata {
@@ -208,6 +220,165 @@ public:
 
         return true;
     }
+
+    bool processprojectdata()
+    {
+        // Must have 90% success rate to make a contract
+        int nRequired = std::floor((double)vWhitelist.size() * 0.9);
+        int nSuccess = 0;
+
+        for (const auto& wl : vWhitelist)
+        {
+            printf("#%s\n", wl.first.c_str());
+
+            if (!importprojectdata(wl.first))
+                _log(NN_ERROR, "processprojectdata", "Failed to process stats for project <project=" + wl.first + ">");
+
+            else
+                nSuccess++;
+
+        }
+
+        if (nSuccess < nRequired)
+        {
+            _log(NN_ERROR, "processprojectdata", "Failed to process required amount of projects <Successcount=" + std::to_string(nSuccess) + ", Requiredcount=" + std::to_string(nRequired) + ", whitelistcount=" + std::to_string(vWhitelist.size()) + ">");
+
+            return false;
+        }
+
+        else
+            return true;
+    }
+
+    bool importprojectdata(const std::string& project)
+    {
+        std::string etag;
+
+        nndb db;
+
+        if (!SearchDatabase("ETAG", project, etag))
+        {
+            _log(NN_ERROR, "importprojectdata", "Failed to find etag for project <project=" + project + ">");
+
+            return false;
+        }
+
+        // Drop previous table for project as we are fresh syncing this project from file
+
+        db.drop_query(project);
+
+        try
+        {
+            // GZIP input stream
+
+            std::string file = NNPathStr() + "/" + etag + ".gz";
+
+            printf("input file is %s\n", file.c_str());
+            std::ifstream input_file(file, std::ios_base::in | std::ios_base::binary);
+
+            if (!input_file)
+            {
+                _log(NN_ERROR, "importprojectdata", "Unable to open project file <file=" + etag + ".gz>");
+
+                return false;
+            }
+
+            boostio::filtering_istream in;
+            in.push(boostio::gzip_decompressor());
+            in.push(input_file);
+
+            bool bcomplete = false;
+            bool berror = false;
+
+            while (!bcomplete && !berror)
+            {
+                if (bcomplete)
+                    break;
+
+                std::string line;
+
+                while (std::getline(in, line))
+                {
+
+                    if (line != "<users>")
+                        continue;
+
+                    else
+                        break;
+                }
+
+                while (std::getline(in, line))
+                {
+                    if (bcomplete || berror)
+                        break;
+
+                    if (line == "</users>")
+                    {
+                        bcomplete = true;
+                        printf("Complete\n");
+                        break;
+                    }
+
+                    if (line == "<user>")
+                    {
+                        std::string cpid;
+                        std::string rac;
+
+                        while (std::getline(in, line))
+                        {
+                            if (line == "</user>")
+                                break;
+
+                            if (line.find("<cpid>") != std::string::npos)
+                                cpid = line.substr(7, line.size() - 14);
+
+                            if (line.find("<expavg_credit>") != std::string::npos)
+                                rac = line.substr(16, line.size() - 32);
+                        }
+
+                        if (cpid.empty() || rac.empty())
+                            continue;
+
+                        printf("CPID is %s : RAC is %s\n", cpid.c_str(), rac.c_str());
+
+                        if (mCPIDs.count(cpid) != 0)
+                        {
+
+                            if (!InsertDatabase(project, cpid, rac))
+                            {
+                                _log(NN_ERROR, "importprojectdata", "Failed to insert into project table with user data <project=" + project + ", cpid=" + cpid + ", rac=" + rac + ">");
+
+                                continue;
+                            }
+
+                            if (!InsertDatabase(cpid, project, rac))
+                            {
+                                _log(NN_ERROR, "importprojectdata", "Failed to insert into cpid table with user data <project=" + project + ", cpid=" + cpid + ", rac=" + rac + ">");
+
+                                // If this fails but last past we need to remove that data
+                                db.delete_query(project, cpid);
+
+                                continue;
+                            }
+
+                            // Success
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        catch (std::exception& ex)
+        {
+            return false;
+        }
+
+        catch (boost::exception& ex)
+        {
+            return false;
+        }
+    }
 };
 
 // NN Class Functions
@@ -227,12 +398,10 @@ bool nn::syncdata()
     nndata data;
 
     if (!data.gatherprojectdata())
-         return false;
+        return false;
 
+    if (!data.processprojectdata())
+        return false;
 }
 
-bool nn::processprojectdata()
-{
-
-}
 // Regular functions

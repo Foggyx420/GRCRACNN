@@ -74,7 +74,7 @@ public:
 
                 try
                 {
-                    fs::remove(fp);
+                    fs::remove(destination.c_str());
                 }
 
                 catch (std::exception& ex)
@@ -94,7 +94,7 @@ public:
 
                 try
                 {
-                    fs::remove(fp);
+                    fs::remove(destination.c_str());
                 }
 
                 catch (std::exception& ex)

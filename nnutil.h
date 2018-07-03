@@ -8,7 +8,6 @@
 #include <iostream>
 #include <fstream>
 #include <cmath>
-#include <zlib.h>
 #include <inttypes.h>
 
 namespace fs = std::experimental::filesystem;
@@ -72,7 +71,7 @@ public:
     }
 };
 
-inline fs::path NNPath()
+fs::path NNPath()
 {
     // TODO read from gridcoin config to allow custom location
 
@@ -88,6 +87,24 @@ inline fs::path NNPath()
 
     else
         return path;
+}
+
+std::string NNPathStr()
+{
+    // TODO read from gridcoin config to allow custom location
+
+    fs::path path = fs::current_path() / "NeuralNode";
+
+    // Path don't exist then use default location
+    if (!fs::exists(path))
+    {
+        path = fs::current_path() / "NeuralNode";
+
+        return path.string();
+    }
+
+    else
+        return path.string();
 }
 
 #endif // NNUTIL_H

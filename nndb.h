@@ -9,6 +9,7 @@
  *
  * Type:
  *     REF              : TABLE         KEY         VALUE
+ *-------------------------------------------------------
  *     project          : PROJECT       CPID        RAC
  *     cpid             : CPID          PROJECT     RAC
  *     etag             : ETAG          PROJECT     ETAG
@@ -90,15 +91,22 @@ public:
         return false;
     }
 
-    bool drop_query(const std::string& table)
+    void drop_query(const std::string& table)
     {
         std::string dropquery = "DROP TABLE IF EXISTS '" + table + "';";
 
         sqlite3_prepare_v2(db, dropquery.c_str(), dropquery.size(), &stmt, NULL);
 
         sqlite3_step(stmt);
+    }
 
-        return true;
+    void delete_query(const std::string& table, const std::string& key)
+    {
+        std::string dropquery = "DELETE FROM TABLE IF EXISTS '" + table + "' WHERE key = '" + key + "';";
+
+        sqlite3_prepare_v2(db, dropquery.c_str(), dropquery.size(), &stmt, NULL);
+
+        sqlite3_step(stmt);
     }
 };
 
@@ -113,7 +121,7 @@ bool SearchDatabase(const std::string& sTable, const std::string& sKey, std::str
 
     std::string sSearchQuery;
 
-    sSearchQuery = "SELECT valuea, valueb FROM '" + sTable + "' WHERE key = '" + sKey + "';";
+    sSearchQuery = "SELECT value FROM '" + sTable + "' WHERE key = '" + sKey + "';";
 
     nndb db;
 
@@ -141,7 +149,7 @@ bool InsertDatabase(const std::string& sTable, const std::string& sKey, const st
 
     std::string sInsertQuery;
 
-    sInsertQuery = "CREATE TABLE IF NOT EXISTS " + sTable + " (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);";
+    sInsertQuery = "CREATE TABLE IF NOT EXISTS '" + sTable + "' (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);";
 
     if (!db.insert_query(true, sInsertQuery))
     {
@@ -150,7 +158,7 @@ bool InsertDatabase(const std::string& sTable, const std::string& sKey, const st
         return false;
     }
 
-    sInsertQuery = "INSERT OR REPLACE INTO " + sTable + " VALUES('" + sKey + "', '" + sValue + "');";
+    sInsertQuery = "INSERT OR REPLACE INTO '" + sTable + "' VALUES('" + sKey + "', '" + sValue + "');";
 
     if (!db.insert_query(false, sInsertQuery))
     {

@@ -8,9 +8,10 @@
  * We will store by type with two values
  *
  * Type:
- *     project          : project data (PROJECT -> CPID, RAC)
- *     cpid             : cpid data (CPID -> PROJECT, RAC)
- *     etag             : etag data (ETAG -> PROJECT, ETAG)
+ *     REF              : TABLE         KEY         VALUE
+ *     project          : PROJECT       CPID        RAC
+ *     cpid             : CPID          PROJECT     RAC
+ *     etag             : ETAG          PROJECT     ETAG
  */
 
 const std::string nndbfile = "nn.db";
@@ -63,7 +64,7 @@ public:
         return true;
     }
 
-    bool search_query(const std::string& searchquery, std::string& valuea, std::string& valueb)
+    bool search_query(const std::string& searchquery, std::string& value)
     {
         sqlite3_prepare_v2(db, searchquery.c_str(), searchquery.size(), &stmt, NULL);
 
@@ -71,8 +72,7 @@ public:
         {
             if (sqlite3_step(stmt) == SQLITE_ROW)
             {
-                valuea = (const char*)sqlite3_column_text(stmt, 0);
-                valueb = (const char*)sqlite3_column_text(stmt, 1);
+                value = (const char*)sqlite3_column_text(stmt, 0);
 
                 sqlite3_finalize(stmt);
 
@@ -102,7 +102,7 @@ public:
     }
 };
 
-bool SearchDatabase(const std::string& sTable, const std::string& sKey, std::string& sValuea, std::string& sValueb)
+bool SearchDatabase(const std::string& sTable, const std::string& sKey, std::string& sValue)
 {
     if (sTable.empty() || sKey.empty())
     {
@@ -117,7 +117,7 @@ bool SearchDatabase(const std::string& sTable, const std::string& sKey, std::str
 
     nndb db;
 
-    if (db.search_query(sSearchQuery, sValuea, sValueb))
+    if (db.search_query(sSearchQuery, sValue))
         return true;
 
     else
@@ -128,11 +128,11 @@ bool SearchDatabase(const std::string& sTable, const std::string& sKey, std::str
     }
 }
 
-bool InsertDatabase(const std::string& sTable, const std::string& sKey, const std::string& sValuea, const std::string& sValueb)
+bool InsertDatabase(const std::string& sTable, const std::string& sKey, const std::string& sValue)
 {
-    if (sValuea.empty() || sValueb.empty() || sTable.empty() || sKey.empty())
+    if (sValue.empty() || sTable.empty() || sKey.empty())
     {
-        _log(NN_ERROR, "InsertDatabase", "Arguements cannot be empty. Programming ERROR. <table=" + sTable + ", key=" + sKey + ", valuea=" + sValuea + ", valueb=" + sValueb + ">");
+        _log(NN_ERROR, "InsertDatabase", "Arguements cannot be empty. Programming ERROR. <table=" + sTable + ", key=" + sKey + ", valuea=" + sValue + ">");
 
         return false;
     }
@@ -141,7 +141,7 @@ bool InsertDatabase(const std::string& sTable, const std::string& sKey, const st
 
     std::string sInsertQuery;
 
-    sInsertQuery = "CREATE TABLE IF NOT EXISTS " + sTable + " (key TEXT PRIMARY KEY NOT NULL, valuea TEXT NOT NULL, valueb TEXT NOT NULL);";
+    sInsertQuery = "CREATE TABLE IF NOT EXISTS " + sTable + " (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);";
 
     if (!db.insert_query(true, sInsertQuery))
     {
@@ -150,7 +150,7 @@ bool InsertDatabase(const std::string& sTable, const std::string& sKey, const st
         return false;
     }
 
-    sInsertQuery = "INSERT OR REPLACE INTO " + sTable + " VALUES('" + sKey + "', '" + sValuea + "', '" + sValueb + "');";
+    sInsertQuery = "INSERT OR REPLACE INTO " + sTable + " VALUES('" + sKey + "', '" + sValue + "');";
 
     if (!db.insert_query(false, sInsertQuery))
     {

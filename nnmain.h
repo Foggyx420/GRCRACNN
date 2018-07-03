@@ -7,9 +7,11 @@
 class nn
 {
 public:
-    bool dropdatabase(const std::string& table);
+    bool syncdata();
 
 private:
+    bool isnnparticipant();
+    bool processprojectdata();
 };
 
 #endif // NNMAIN_H

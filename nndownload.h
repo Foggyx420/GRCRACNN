@@ -65,12 +65,42 @@ public:
             res = curl_easy_perform(curl);
             fclose(fp);
 
+            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+            // Above code 399 is error for client/server
+            if (http_code >= 400)
+            {
+                _log(NN_ERROR, "nncurl_http_download", "HTTP response code for project file <urlfile=" + url + "> (" + std::to_string(http_code) + ")");
+
+                try
+                {
+                    fs::remove(fp);
+                }
+
+                catch (std::exception& ex)
+                {
+                    _log(NN_ERROR, "nncurl_http_download", "Failed to remove file <file=" + destination + "> (" + std::string(ex.what()) + ")");
+                }
+
+                return false;
+            }
+
             if (res > 0)
             {
                 if (fp)
                     fclose(fp);
 
                 _log(NN_ERROR, "nncurl_http_download", "Failed to download project file <urlfile=" + url + "> (" + curl_easy_strerror(res) + ")");
+
+                try
+                {
+                    fs::remove(fp);
+                }
+
+                catch (std::exception& ex)
+                {
+                    _log(NN_ERROR, "nncurl_http_download", "Failed to remove file <file=" + destination + "> (" + std::string(ex.what()) + ")");
+                }
 
                 return false;
             }
@@ -109,6 +139,8 @@ public:
 
         res = curl_easy_perform(curl);
 
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
         if (res > 0)
         {
             _log(NN_ERROR, "nncurl_http_header", "Failed to capture header of project file <urlfile=" + url + ">");
@@ -116,7 +148,16 @@ public:
             return false;
         }
 
+        // Above code 399 is error for client/server
+        if (http_code >= 400)
+        {
+            _log(NN_ERROR, "nncurl_http_download", "HTTP response code for project file <urlfile=" + url + "> (" + std::to_string(http_code) + ")");
+
+            return false;
+        }
+
         std::istringstream ssinput(header);
+
         for (std::string line; std::getline(ssinput, line);)
         {
             if (line.find("ETag: ") != std::string::npos)
@@ -132,24 +173,19 @@ public:
                 etag = etag.substr(1, etag.size() - 3);
             }
 
-            else
-            {
-                _log(NN_ERROR, "nncurl_http_header", "Failed to capture ETag for project url <urlfile=" + url + ">");
+        }
 
-                return false;
-            }
+        if (etag.empty())
+        {
+            _log(NN_ERROR, "nncurl_http_header", "Failed to capture ETag for project url <urlfile=" + url + ">");
+
+            return false;
         }
 
         _log(NN_INFO, "nncurl_http_header", "Captured ETag for project url <urlfile=" + url + ", ETag=" + etag + ">");
 
         return true;
     }
-};
-
-class nndownload
-{
-public:
-    nndownload();
 };
 
 #endif // NNDOWNLOAD_H

@@ -60,44 +60,7 @@ public:
     {
         builtstring << std::endl;
     }
-/*    void append(double value)
-    {
-        builtstring.append(std::to_string(value));
-    }
 
-    void oxml(const std::string &value)
-    {
-        builtstring.append("<");
-        builtstring.append(value);
-        builtstring.append(">");
-    }
-
-    void cxml(const std::string &value)
-    {
-        builtstring.append("</");
-        builtstring.append(value);
-        builtstring.append(">");
-    }
-
-    void ltype(const std::string &value)
-    {
-        builtstring.append(" [");
-        builtstring.append(value);
-        builtstring.append("] ");
-    }
-
-    void lcall(const std::string &value)
-    {
-        builtstring.append("<");
-        builtstring.append(value);
-        builtstring.append("> : ");
-    }
-
-    void nl()
-    {
-        builtstring.append("\n");
-    }
-*/
     std::string value()
     {
         return builtstring.str();
@@ -108,5 +71,23 @@ public:
         return sizeof(builtstring);
     }
 };
+
+inline fs::path NNPath()
+{
+    // TODO read from gridcoin config to allow custom location
+
+    fs::path path = fs::current_path() / "NeuralNode";
+
+    // Path don't exist then use default location
+    if (!fs::exists(path))
+    {
+        path = fs::current_path() / "NeuralNode";
+
+        return path;
+    }
+
+    else
+        return path;
+}
 
 #endif // NNUTIL_H

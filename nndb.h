@@ -33,10 +33,18 @@ public:
 
     nndb()
     {
+        bool exists = false;
+
+        if (fs::exists(nndbfile.c_str()))
+            exists = true;
+
         res = sqlite3_open_v2(nndbfile.c_str(), &db, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE, nullptr);
 
         if (res)
             _log(NN_ERROR, "nndb", "sqlite error occured while opening database (" + std::string(sqlite3_errstr(res)) + ")");
+
+        if (!exists)
+            enable_vacuum();
     }
 
     ~nndb()
@@ -45,6 +53,18 @@ public:
 
         if (res)
             _log(NN_ERROR, "nndb", "sqlite error occured while closing database (" + std::string(sqlite3_errstr(res)) + ")");
+    }
+
+    void enable_vacuum()
+    {
+        printf("here\n");
+        std::string vacuumquery;
+
+        vacuumquery = "PRAGMA auto_vacuum = 1;";
+
+        sqlite3_prepare_v2(db, vacuumquery.c_str(), vacuumquery.size(), &stmt, NULL);
+
+        sqlite3_step(stmt);
     }
 
     bool insert_query(bool table, const std::string& querystring)

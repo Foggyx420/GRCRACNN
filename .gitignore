@@ -1,0 +1,4 @@
+compile.sh
+*.pro
+*.o
+NeuralNode

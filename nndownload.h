@@ -60,6 +60,7 @@ public:
             curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writetofile);
             curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
             curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+            curl_easy_setopt(curl, CURLOPT_ACCEPTTIMEOUT_MS, 10000);
             curl_easy_setopt(curl, CURLOPT_PROXY, "");
             curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
             res = curl_easy_perform(curl);
@@ -87,9 +88,6 @@ public:
 
             if (res > 0)
             {
-                if (fp)
-                    fclose(fp);
-
                 _log(NN_ERROR, "nncurl_http_download", "Failed to download project file <urlfile=" + url + "> (" + curl_easy_strerror(res) + ")");
 
                 try
@@ -136,7 +134,8 @@ public:
         curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 1L);
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-
+        curl_easy_setopt(curl, CURLOPT_ACCEPTTIMEOUT_MS, 10000);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
         res = curl_easy_perform(curl);
 
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);

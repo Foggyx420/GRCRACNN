@@ -23,14 +23,42 @@ bool IsNeuralParticipant();
 void setdummy()
 {
     // Dummy CPIDs -- In live network conditions the cpids and whitelist are in cache
-    mCPIDs.insert("f636448e64b48e26aaf610a48a48bb91");
-    mCPIDs.insert("0b5ef259411ec18e8dac2be0b732fd23");
-    mCPIDs.insert("a92e1cf0903633d62283ea1f101a1af3");
-    mCPIDs.insert("af73cd19f79a0ade8e6ef695faa2c776");
-    mCPIDs.insert("55cd02be28521073d367f7ca38615682");
+    std::string file = "beacons.txt";
+    std::string line;
+
+    std::ifstream input_file(file, std::ios_base::in);
+
+    while(std::getline(input_file, line))
+    {
+        if (line.empty())
+            continue;
+
+        mCPIDs.insert(line);
+    }
+
     vWhitelist.push_back(std::make_pair("enigma@home", "http://www.enigmaathome.net/@"));
     vWhitelist.push_back(std::make_pair("odlk1", "https://boinc.multi-pool.info/latinsquares/@"));
-    vWhitelist.push_back(std::make_pair("sztaki", "http://szdg.lpds.sztaki.hu/szdg/@"));
+    vWhitelist.push_back(std::make_pair("amicable numbers", "http://sech.me/boinc/Amicable/@"));
+    vWhitelist.push_back(std::make_pair("citizen science grid", "http://csgrid.org/csg/@"));
+    vWhitelist.push_back(std::make_pair("srbase", "http://srbase.my-firewall.org/sr5/@"));
+    vWhitelist.push_back(std::make_pair("tn-grid", "http://gene.disi.unitn.it/test/@"));
+    vWhitelist.push_back(std::make_pair("vgtu project@home", "https://boinc.vgtu.lt/@"));
+    vWhitelist.push_back(std::make_pair("asteroids@home", "http://asteroidsathome.net/boinc/@"));
+    vWhitelist.push_back(std::make_pair("collatz conjecture", "http://boinc.thesonntags.com/collatz/@"));
+    vWhitelist.push_back(std::make_pair("cosmology@home", "http://www.cosmologyathome.org/@"));
+    vWhitelist.push_back(std::make_pair("einstein@home", "http://einstein.phys.uwm.edu/@"));
+    vWhitelist.push_back(std::make_pair("gpugrid", "http://www.gpugrid.net/@"));
+    vWhitelist.push_back(std::make_pair("lhc@home classic", "https://lhcathome.cern.ch/lhcathome/@"));
+    vWhitelist.push_back(std::make_pair("milkyway@home", "http://milkyway.cs.rpi.edu/milkyway/@"));
+    vWhitelist.push_back(std::make_pair("nfs@home", "http://escatter11.fullerton.edu/nfs/@"));
+    vWhitelist.push_back(std::make_pair("numberfields@home", "http://numberfields.asu.edu/NumberFields/@"));
+    vWhitelist.push_back(std::make_pair("primegrid", "http://www.primegrid.com/@"));
+    vWhitelist.push_back(std::make_pair("rosetta@home", "http://boinc.bakerlab.org/rosetta/@"));
+    vWhitelist.push_back(std::make_pair("seti@home", "http://setiathome.berkeley.edu/@"));
+    vWhitelist.push_back(std::make_pair("universe@home", "http://universeathome.pl/universe/@"));
+    vWhitelist.push_back(std::make_pair("yafu", "http://yafu.myfirewall.org/yafu/@"));
+    vWhitelist.push_back(std::make_pair("yoyo@home", "http://www.rechenkraft.net/yoyo/@"));
+
     return;
 }
 
@@ -252,6 +280,8 @@ public:
 
     bool importprojectdata(const std::string& project)
     {
+        printf("Importing project %s\n", project.c_str());
+
         std::string etag;
 
         nndb db;
@@ -321,25 +351,26 @@ public:
 
                     if (line == "<user>")
                     {
-                        std::string cpid;
-                        std::string rac;
+                        stringbuilder ud;
 
                         while (std::getline(in, line))
                         {
                             if (line == "</user>")
                                 break;
 
-                            if (line.find("<cpid>") != std::string::npos)
-                                cpid = line.substr(7, line.size() - 14);
-
-                            if (line.find("<expavg_credit>") != std::string::npos)
-                                rac = line.substr(16, line.size() - 32);
+                            ud.append(line);
                         }
+
+                        std::string cpid = ExtractXML(ud.value(), "<cpid>", "</cpid>");
+                        std::string rac = ExtractXML(ud.value(), "<expavg_credit>", "</expavg_credit>");
 
                         if (cpid.empty() || rac.empty())
                             continue;
 
-                        printf("CPID is %s : RAC is %s\n", cpid.c_str(), rac.c_str());
+                        if (std::stod(rac) < 10)
+                            continue;
+
+//                        printf("CPID is %s : RAC is %s\n", cpid.c_str(), rac.c_str());
 
                         if (mCPIDs.count(cpid) != 0)
                         {
@@ -378,6 +409,8 @@ public:
         {
             return false;
         }
+
+        return true;
     }
 };
 
@@ -390,6 +423,8 @@ bool nn::isnnparticipant()
 
 bool nn::syncdata()
 {
+    bNNStillSyncing = true;
+
     if (!isnnparticipant())
         return false;
 
@@ -398,10 +433,23 @@ bool nn::syncdata()
     nndata data;
 
     if (!data.gatherprojectdata())
-        return false;
+    {
+        bNNHasValidContract = false;
 
-    if (!data.processprojectdata())
         return false;
+    }
+    if (!data.processprojectdata())
+    {
+        bNNHasValidContract = false;
+
+        return false;
+    }
+
+    nNNLastSynced = TIME(NULL);
+
+    bNNStillSyncing = false;
+
+    return true;
 }
 
 // Regular functions

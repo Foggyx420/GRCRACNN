@@ -15,8 +15,6 @@
  *     etag             : ETAG          PROJECT     ETAG
  */
 
-const std::string nndbfile = "nn.db";
-
 /************************
 * Network Node Database *
 ************************/
@@ -25,14 +23,29 @@ class nndb
 {
 private:
 
+    bool dbopen = false;
     sqlite3* db = nullptr;
     int res = 0;
     sqlite3_stmt* stmt = nullptr;
+    std::string nndbfile = "nn.db";
 
 public:
 
     nndb()
     {
+        open_db();
+    }
+
+    ~nndb()
+    {
+        close_db();
+    }
+
+    void open_db()
+    {
+        if (db != nullptr)
+            db == nullptr;
+
         bool exists = false;
 
         if (fs::exists(nndbfile.c_str()))
@@ -41,23 +54,59 @@ public:
         res = sqlite3_open_v2(nndbfile.c_str(), &db, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE, nullptr);
 
         if (res)
+        {
+            dbopen = false;
+
             _log(NN_ERROR, "nndb", "sqlite error occured while opening database (" + std::string(sqlite3_errstr(res)) + ")");
+        }
+
+        _log(NN_INFO, "nndb", "Database is being opened by request");
+
+        dbopen = true;
 
         if (!exists)
             enable_vacuum();
     }
 
-    ~nndb()
+    void close_db()
     {
         res = sqlite3_close_v2(db);
 
+        _log(NN_INFO, "nndb", "Database is being closed by request");
+
         if (res)
             _log(NN_ERROR, "nndb", "sqlite error occured while closing database (" + std::string(sqlite3_errstr(res)) + ")");
+
+        else
+        {
+            db = nullptr;
+
+            dbopen = false;
+        }
+    }
+
+    bool isopen_db()
+    {
+        return dbopen;
+    }
+
+    bool reopen_db()
+    {
+        // Refresh and reopen database
+        // If db is closed for whatever reason lets reopen it
+        _log(NN_WARNING, "nndb", "Database is being requested to be reopened");
+
+        open_db();
+
+        if (isopen_db())
+            return true;
+
+        else
+            return false;
     }
 
     void enable_vacuum()
     {
-        printf("here\n");
         std::string vacuumquery;
 
         vacuumquery = "PRAGMA auto_vacuum = 1;";
@@ -69,10 +118,24 @@ public:
 
     bool insert_query(bool table, const std::string& querystring)
     {
+        if (!dbopen)
+        {
+            if (reopen_db())
+                _log(NN_INFO, "nndb_insert_query", "Database successfully reopened");
+
+            else
+            {
+                _log(NN_ERROR, "nndb_insert_query", "Database was not successfully reopened");
+
+                return false;
+            }
+        }
+
         sqlite3_prepare_v2(db, querystring.c_str(), querystring.size(), &stmt, NULL);
 
         res = sqlite3_step(stmt);
 
+        printf("res is %d\n", res);
         if (!table && res != SQLITE_DONE)
         {
             sqlite3_finalize(stmt);
@@ -87,6 +150,19 @@ public:
 
     bool search_query(const std::string& searchquery, std::string& value)
     {
+        if (!dbopen)
+        {
+            if (reopen_db())
+                _log(NN_INFO, "nndb_search_query", "Database successfully reopened");
+
+            else
+            {
+                _log(NN_ERROR, "nndb_search_query", "Database was not successfully reopened");
+
+                return false;
+            }
+        }
+
         sqlite3_prepare_v2(db, searchquery.c_str(), searchquery.size(), &stmt, NULL);
 
         try
@@ -113,6 +189,19 @@ public:
 
     void drop_query(const std::string& table)
     {
+        if (!dbopen)
+        {
+            if (reopen_db())
+                _log(NN_INFO, "nndb_drop_query", "Database successfully reopened");
+
+            else
+            {
+                _log(NN_ERROR, "nndb_drop_query", "Database was not successfully reopened");
+
+                return false;
+            }
+        }
+
         std::string dropquery = "DROP TABLE IF EXISTS '" + table + "';";
 
         sqlite3_prepare_v2(db, dropquery.c_str(), dropquery.size(), &stmt, NULL);
@@ -122,6 +211,19 @@ public:
 
     void delete_query(const std::string& table, const std::string& key)
     {
+        if (!dbopen)
+        {
+            if (reopen_db())
+                _log(NN_INFO, "nndb_delete_query", "Database successfully reopened");
+
+            else
+            {
+                _log(NN_ERROR, "nndb_delete_query", "Database was not successfully reopened");
+
+                return false;
+            }
+        }
+
         std::string dropquery = "DELETE FROM TABLE IF EXISTS '" + table + "' WHERE key = '" + key + "';";
 
         sqlite3_prepare_v2(db, dropquery.c_str(), dropquery.size(), &stmt, NULL);
@@ -130,7 +232,7 @@ public:
     }
 };
 
-bool SearchDatabase(const std::string& sTable, const std::string& sKey, std::string& sValue)
+bool SearchDatabase(nndb* db, const std::string& sTable, const std::string& sKey, std::string& sValue)
 {
     if (sTable.empty() || sKey.empty())
     {
@@ -143,9 +245,7 @@ bool SearchDatabase(const std::string& sTable, const std::string& sKey, std::str
 
     sSearchQuery = "SELECT value FROM '" + sTable + "' WHERE key = '" + sKey + "';";
 
-    nndb db;
-
-    if (db.search_query(sSearchQuery, sValue))
+    if (db->search_query(sSearchQuery, sValue))
         return true;
 
     else
@@ -156,7 +256,7 @@ bool SearchDatabase(const std::string& sTable, const std::string& sKey, std::str
     }
 }
 
-bool InsertDatabase(const std::string& sTable, const std::string& sKey, const std::string& sValue)
+bool InsertDatabase(nndb* db, const std::string& sTable, const std::string& sKey, const std::string& sValue)
 {
     if (sValue.empty() || sTable.empty() || sKey.empty())
     {
@@ -165,13 +265,11 @@ bool InsertDatabase(const std::string& sTable, const std::string& sKey, const st
         return false;
     }
 
-    nndb db;
-
     std::string sInsertQuery;
 
     sInsertQuery = "CREATE TABLE IF NOT EXISTS '" + sTable + "' (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);";
 
-    if (!db.insert_query(true, sInsertQuery))
+    if (!db->insert_query(true, sInsertQuery))
     {
         _log(NN_ERROR, "InsertDatabase", "Failed to insert into database <table=" + sTable + ", query=" + sInsertQuery + ">");
 
@@ -180,7 +278,7 @@ bool InsertDatabase(const std::string& sTable, const std::string& sKey, const st
 
     sInsertQuery = "INSERT OR REPLACE INTO '" + sTable + "' VALUES('" + sKey + "', '" + sValue + "');";
 
-    if (!db.insert_query(false, sInsertQuery))
+    if (!db->insert_query(false, sInsertQuery))
     {
         _log(NN_ERROR, "InsertDatabase", "Failed to insert into database <table=" + sTable + ", query=" + sInsertQuery + ">");
 

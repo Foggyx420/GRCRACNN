@@ -3,20 +3,16 @@
 
 #include <string>
 
-// Global Vars
-
-extern int64_t nNNLastSynced = 0;
-extern bool bNNStillSyncing = false;
-extern bool bNNHasValidContract = false;
-
 // gridcoin client class
 class nn
 {
 public:
     bool syncdata();
+    bool isnnparticipant();
 
 private:
-    bool isnnparticipant();
 };
+
+bool SyncData();
 
 #endif // NNMAIN_H

@@ -3,6 +3,8 @@
 
 #include "nnlogger.h"
 #include <sqlite3.h>
+#include <unordered_set>
+#include <iterator>
 
 /* Conform to a basic layout for maximum camptiablility while keeping functions short and sweet
  * We will store by type with two values
@@ -28,6 +30,7 @@ private:
     int res = 0;
     sqlite3_stmt* stmt = nullptr;
     std::string nndbfile = "nn.db";
+    bool dbbusy = false;
 
 public:
 
@@ -65,7 +68,7 @@ public:
         dbopen = true;
 
         if (!exists)
-            enable_vacuum();
+            enable_dbproperties();
     }
 
     void close_db()
@@ -105,15 +108,23 @@ public:
             return false;
     }
 
-    void enable_vacuum()
+    void enable_dbproperties()
     {
-        std::string vacuumquery;
+        // auto_vacuum is set to 2 so we call when to do the vacuum of the database; full mode is performance impacting
+        // syncrhronous when ON will so this every addition to database. This kills performance. results 21mins to < 1 mins
+        std::unordered_set<std::string> properties;
+        properties.insert("PRAGMA auto_vacuum = 2;");
+        properties.insert("PRAGMA synchronous = OFF;");
 
-        vacuumquery = "PRAGMA auto_vacuum = 1;";
+        for (const auto& p : properties)
+        {
+            std::string query = p;
 
-        sqlite3_prepare_v2(db, vacuumquery.c_str(), vacuumquery.size(), &stmt, NULL);
 
-        sqlite3_step(stmt);
+            sqlite3_prepare_v2(db, query.c_str(), query.size(), &stmt, NULL);
+
+            sqlite3_step(stmt);
+        }
     }
 
     bool insert_query(bool table, const std::string& querystring)
@@ -131,11 +142,11 @@ public:
             }
         }
 
+
         sqlite3_prepare_v2(db, querystring.c_str(), querystring.size(), &stmt, NULL);
 
         res = sqlite3_step(stmt);
 
-        printf("res is %d\n", res);
         if (!table && res != SQLITE_DONE)
         {
             sqlite3_finalize(stmt);
@@ -198,7 +209,7 @@ public:
             {
                 _log(NN_ERROR, "nndb_drop_query", "Database was not successfully reopened");
 
-                return false;
+                return;
             }
         }
 
@@ -220,7 +231,7 @@ public:
             {
                 _log(NN_ERROR, "nndb_delete_query", "Database was not successfully reopened");
 
-                return false;
+                return;
             }
         }
 

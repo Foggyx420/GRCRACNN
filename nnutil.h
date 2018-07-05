@@ -9,6 +9,8 @@
 #include <fstream>
 #include <cmath>
 #include <inttypes.h>
+#include <unordered_set>
+#include <unordered_map>
 
 namespace fs = std::experimental::filesystem;
 
@@ -25,6 +27,12 @@ public:
         builtstring << value;
     }
 
+/*
+ *     void appendnws(const std::string& value)
+    {
+        builtstring << value.replace(value.begin(), value.end(), ' ', '');
+    }
+*/
     void append(double value)
     {
         builtstring << value;
@@ -108,21 +116,43 @@ std::string NNPathStr()
 }
 
 // Copied from gridcoin
-std::string ExtractXML(const std::string& XMLdata, const std::string& key, const std::string& key_end)
+std::string extractxml(const std::string& xmldata, const std::string& key, const std::string& key_end)
 {
 
     std::string extraction = "";
-    std::string::size_type loc = XMLdata.find(key, 0);
+    std::string::size_type loc = xmldata.find(key, 0);
 
     if(loc != std::string::npos)
     {
-        std::string::size_type loc_end = XMLdata.find(key_end, loc + 3);
+        std::string::size_type loc_end = xmldata.find(key_end, loc + 3);
 
         if (loc_end != std::string::npos)
-            extraction = XMLdata.substr(loc + key.length(), loc_end - loc - key.length());
+            extraction = xmldata.substr(loc + key.length(), loc_end - loc - key.length());
     }
 
     return extraction;
 }
 
+/*{
+std::unordered_map<std::string, std::string> storeinmap(const std::string& s, const std)
+
+}
+std::unordered_map<std::pair<std::string, std::string>> split(const std::string& s, const std::string& delim)
+{
+    size_t pos = 0;
+    size_t end = 0;
+    std::unordered_map<std::pair<std::string, std::string>> elems;
+
+    while ((end = s.find(delim, pos)) != std::string::npos)
+    {
+        elems.insert(s.substr(pos, end - pos));
+        pos = end + delim.size();
+    }
+
+    // Append final value
+    elems.insert(s.substr(pos, end - pos));
+
+    return elems;
+}
+*/
 #endif // NNUTIL_H

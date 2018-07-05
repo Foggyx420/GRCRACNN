@@ -158,7 +158,7 @@ public:
         }
     }
 
-    bool gatherprojectdata()
+    bool gatherprojectdata(nndb* db)
     {
         // Must have 90% success rate to make a contract
         int nRequired = std::floor((double)vWhitelist.size() * 0.9);
@@ -182,7 +182,7 @@ public:
             {
                 std::string sDBETag;
 
-                if (SearchDatabase("ETAG", vWL.first, sDBETag))
+                if (SearchDatabase(db, "ETAG", vWL.first, sDBETag))
                 {
                     if (sDBETag == sETag)
                     {
@@ -208,7 +208,7 @@ public:
                 {
                     _log(NN_INFO, "gatherprojectdata", "Project file for " + vWL.first + " downloaded and stored as " + sETag + ".gz");
 
-                    if (InsertDatabase("ETAG", vWL.first, sETag))
+                    if (InsertDatabase(db, "ETAG", vWL.first, sETag))
                     {
                         nSuccess++;
 
@@ -249,7 +249,7 @@ public:
         return true;
     }
 
-    bool processprojectdata()
+    bool processprojectdata(nndb* db)
     {
         // Must have 90% success rate to make a contract
         int nRequired = std::floor((double)vWhitelist.size() * 0.9);
@@ -257,13 +257,18 @@ public:
 
         for (const auto& wl : vWhitelist)
         {
+            int64_t t = time(NULL);
+
             printf("#%s\n", wl.first.c_str());
 
-            if (!importprojectdata(wl.first))
+            if (!importprojectdata(db, wl.first))
                 _log(NN_ERROR, "processprojectdata", "Failed to process stats for project <project=" + wl.first + ">");
 
             else
                 nSuccess++;
+
+            int64_t u = time(NULL);
+            printf("%s took %" PRId64 "\n", wl.first.c_str(), u-t);
 
         }
 
@@ -278,15 +283,13 @@ public:
             return true;
     }
 
-    bool importprojectdata(const std::string& project)
+    bool importprojectdata(nndb* db, const std::string& project)
     {
         printf("Importing project %s\n", project.c_str());
 
         std::string etag;
 
-        nndb db;
-
-        if (!SearchDatabase("ETAG", project, etag))
+        if (!SearchDatabase(db, "ETAG", project, etag))
         {
             _log(NN_ERROR, "importprojectdata", "Failed to find etag for project <project=" + project + ">");
 
@@ -295,7 +298,7 @@ public:
 
         // Drop previous table for project as we are fresh syncing this project from file
 
-        db.drop_query(project);
+        db->drop_query(project);
 
         try
         {
@@ -361,8 +364,8 @@ public:
                             ud.append(line);
                         }
 
-                        std::string cpid = ExtractXML(ud.value(), "<cpid>", "</cpid>");
-                        std::string rac = ExtractXML(ud.value(), "<expavg_credit>", "</expavg_credit>");
+                        std::string cpid = extractxml(ud.value(), "<cpid>", "</cpid>");
+                        std::string rac = extractxml(ud.value(), "<expavg_credit>", "</expavg_credit>");
 
                         if (cpid.empty() || rac.empty())
                             continue;
@@ -375,19 +378,19 @@ public:
                         if (mCPIDs.count(cpid) != 0)
                         {
 
-                            if (!InsertDatabase(project, cpid, rac))
+                            if (!InsertDatabase(db, project, cpid, rac))
                             {
                                 _log(NN_ERROR, "importprojectdata", "Failed to insert into project table with user data <project=" + project + ", cpid=" + cpid + ", rac=" + rac + ">");
 
                                 continue;
                             }
 
-                            if (!InsertDatabase(cpid, project, rac))
+                            if (!InsertDatabase(db, cpid, project, rac))
                             {
                                 _log(NN_ERROR, "importprojectdata", "Failed to insert into cpid table with user data <project=" + project + ", cpid=" + cpid + ", rac=" + rac + ">");
 
                                 // If this fails but last past we need to remove that data
-                                db.delete_query(project, cpid);
+                                db->delete_query(project, cpid);
 
                                 continue;
                             }
@@ -423,32 +426,28 @@ bool nn::isnnparticipant()
 
 bool nn::syncdata()
 {
-    bNNStillSyncing = true;
+    nndata data;
 
     if (!isnnparticipant())
         return false;
 
     setdummy();
 
-    nndata data;
-
-    if (!data.gatherprojectdata())
+    nndb* db = new nndb;
+    int64_t a = time(NULL);
+    if (!data.gatherprojectdata(db))
     {
-        bNNHasValidContract = false;
 
         return false;
     }
-    if (!data.processprojectdata())
+    int64_t b = time(NULL);
+    if (!data.processprojectdata(db))
     {
-        bNNHasValidContract = false;
-
         return false;
     }
 
-    nNNLastSynced = TIME(NULL);
-
-    bNNStillSyncing = false;
-
+    int64_t c = time(NULL);
+    printf("Tasks completed: downloads took %" PRId64 " seconds; Processing data for db took %" PRId64 " seconds; total time %" PRId64 "\n", b-a, c-b, c-a);
     return true;
 }
 

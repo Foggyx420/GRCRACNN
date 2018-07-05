@@ -6,10 +6,8 @@ using namespace std;
 int main()
 {
     cout << "Hello World!" << endl;
-
-    nn data;
-
-    if (!data.syncdata())
+    nn nn;
+    if (!nn.syncdata())
         printf("Fail\n");
     else
         printf("Success\n");

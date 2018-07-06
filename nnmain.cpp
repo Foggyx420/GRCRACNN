@@ -10,7 +10,6 @@
 #include <boost/iostreams/copy.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
 #include <zlib.h>
-#include <unordered_set>
 
 // Dummy testing
 std::vector<std::pair<std::string, std::string>> vWhitelist;
@@ -84,7 +83,7 @@ public:
 
                 else
                 {
-                    _log(NN_WARNING, "deleteprojectfile", "Project file was not found");
+                    _log(NN, WARNING, "deleteprojectfile", "Project file was not found");
 
                     return;
                 }
@@ -93,7 +92,7 @@ public:
 
         catch (std::exception& ex)
         {
-            _log(NN_ERROR, "deleteprojectfile", "Std exception occured (" + std::string(ex.what()) + ")");
+            _log(NN, ERROR, "deleteprojectfile", "Std exception occured (" + std::string(ex.what()) + ")");
 
             return;
         }
@@ -118,14 +117,14 @@ public:
 
             if (prjdownload.http_download(prjfileurl, std::string(check_file)))
             {
-                _log(NN_INFO, "downloadprojectfile", "Successfully downloaded project file <prjfile=" + prjfileurl + ", etags=" + etag + ">");
+                _log(NN, INFO, "downloadprojectfile", "Successfully downloaded project file <prjfile=" + prjfileurl + ", etags=" + etag + ">");
 
                 return true;
             }
 
             else
             {
-                _log(NN_ERROR, "downloadrojectfile", "Failed to download project file <prjfile=" + prjfileurl + ", etags=" + etag + ">");
+                _log(NN, ERROR, "downloadrojectfile", "Failed to download project file <prjfile=" + prjfileurl + ", etags=" + etag + ">");
 
                 return false;
             }
@@ -133,7 +132,7 @@ public:
 
         catch (std::exception& ex)
         {
-            _log(NN_ERROR, "downloadprojectfile", "Std exception occured (" + std::string(ex.what()) + ")");
+            _log(NN, ERROR, "downloadprojectfile", "Std exception occured (" + std::string(ex.what()) + ")");
 
             return false;
         }
@@ -145,14 +144,14 @@ public:
 
         if (prjheader.http_header(prjfileurl, etag))
         {
-            _log(NN_INFO, "gatherprojectheader", "Successfully received project file header <prjfile=" + prjfileurl + ", etag=" + etag + ">");
+            _log(NN, INFO, "gatherprojectheader", "Successfully received project file header <prjfile=" + prjfileurl + ", etag=" + etag + ">");
 
             return true;
         }
 
         else
         {
-            _log(NN_WARNING, "gatherprojectheader", "Failed to receive project file header");
+            _log(NN, WARNING, "gatherprojectheader", "Failed to receive project file header");
 
             return false;
         }
@@ -164,11 +163,13 @@ public:
         int nRequired = std::floor((double)vWhitelist.size() * 0.9);
         int nSuccess = 0;
 
+        db->create_table("ETAG");
+
         for (auto const& vWL : vWhitelist)
         {
             if (vWL.first.empty() || vWL.second.empty())
             {
-                _log(NN_WARNING, "gatherprojectdata", "Entry in Whitelist vector is empty!");
+                _log(NN, WARNING, "gatherprojectdata", "Entry in Whitelist vector is empty!");
 
                 continue;
             }
@@ -182,12 +183,12 @@ public:
             {
                 std::string sDBETag;
 
-                if (SearchDatabase(db, "ETAG", vWL.first, sDBETag))
+                if (db->search_table("ETAG", vWL.first, sDBETag))
                 {
                     if (sDBETag == sETag)
                     {
                         // No change
-                        _log(NN_INFO, "gatherprojectdata", "Project file on server for " + vWL.first + " is unchanged; no need to download");
+                        _log(NN, INFO, "gatherprojectdata", "Project file on server for " + vWL.first + " is unchanged; no need to download");
 
                         nSuccess++;
 
@@ -196,19 +197,19 @@ public:
                 }
 
                 else
-                    _log(NN_WARNING, "gatherprojectdata", "Project file for " + vWL.first + " not found in database (new?)");
+                    _log(NN, WARNING, "gatherprojectdata", "Project file for " + vWL.first + " not found in database (new?)");
 
                 // Here we download project files
-                _log(NN_INFO, "gatherprojectdata", "Project file on server for " + vWL.first + " is new");
+                _log(NN, INFO, "gatherprojectdata", "Project file on server for " + vWL.first + " is new");
 
                 if (!sDBETag.empty())
                     deleteprojectfile(sDBETag);
 
                 if (downloadprojectfile(sPrjFile, sETag))
                 {
-                    _log(NN_INFO, "gatherprojectdata", "Project file for " + vWL.first + " downloaded and stored as " + sETag + ".gz");
+                    _log(NN, INFO, "gatherprojectdata", "Project file for " + vWL.first + " downloaded and stored as " + sETag + ".gz");
 
-                    if (InsertDatabase(db, "ETAG", vWL.first, sETag))
+                    if (db->insert_entry("ETAG", vWL.first, sETag))
                     {
                         nSuccess++;
 
@@ -217,7 +218,7 @@ public:
 
                     else
                     {
-                        _log(NN_ERROR, "gatherprojectdata", "Failed to insert ETag for project " + vWL.first);
+                        _log(NN, ERROR, "gatherprojectdata", "Failed to insert ETag for project " + vWL.first);
 
                         continue;
                     }
@@ -225,7 +226,7 @@ public:
 
                 else
                 {
-                    _log(NN_ERROR, "gatherprojectdata", "Failed to download project " + vWL.first + "'s file");
+                    _log(NN, ERROR, "gatherprojectdata", "Failed to download project " + vWL.first + "'s file");
 
                     continue;
                 }
@@ -233,7 +234,7 @@ public:
 
             else
             {
-                _log(NN_ERROR, "gatherprojectdata", "Failed to receive project header for " + vWL.first);
+                _log(NN, ERROR, "gatherprojectdata", "Failed to receive project header for " + vWL.first);
 
                 continue;
             }
@@ -241,7 +242,7 @@ public:
 
         if (nSuccess < nRequired)
         {
-            _log(NN_ERROR, "gatherprojectdata", "Failed to retrieve required amount of projects <Successcount=" + std::to_string(nSuccess) + ", Requiredcount=" + std::to_string(nRequired) + ", whitelistcount=" + std::to_string(vWhitelist.size()) + ">");
+            _log(NN, ERROR, "gatherprojectdata", "Failed to retrieve required amount of projects <Successcount=" + std::to_string(nSuccess) + ", Requiredcount=" + std::to_string(nRequired) + ", whitelistcount=" + std::to_string(vWhitelist.size()) + ">");
 
             return false;
         }
@@ -261,11 +262,20 @@ public:
 
             printf("#%s\n", wl.first.c_str());
 
-            if (!importprojectdata(db, wl.first))
-                _log(NN_ERROR, "processprojectdata", "Failed to process stats for project <project=" + wl.first + ">");
+            bool bCritical;
+
+            if (!importprojectdata(db, wl.first, bCritical))
+                _log(NN, ERROR, "processprojectdata", "Failed to process stats for project <project=" + wl.first + ">");
 
             else
                 nSuccess++;
+
+            if (bCritical)
+            {
+                _log(NN, ERROR, "processprojectdata", "Critical error while processing stats for project; Aborting sync <project=" + wl.first + ">");
+
+                return false;
+            }
 
             int64_t u = time(NULL);
             printf("%s took %" PRId64 "\n", wl.first.c_str(), u-t);
@@ -274,7 +284,7 @@ public:
 
         if (nSuccess < nRequired)
         {
-            _log(NN_ERROR, "processprojectdata", "Failed to process required amount of projects <Successcount=" + std::to_string(nSuccess) + ", Requiredcount=" + std::to_string(nRequired) + ", whitelistcount=" + std::to_string(vWhitelist.size()) + ">");
+            _log(NN, ERROR, "processprojectdata", "Failed to process required amount of projects <Successcount=" + std::to_string(nSuccess) + ", Requiredcount=" + std::to_string(nRequired) + ", whitelistcount=" + std::to_string(vWhitelist.size()) + ">");
 
             return false;
         }
@@ -283,22 +293,24 @@ public:
             return true;
     }
 
-    bool importprojectdata(nndb* db, const std::string& project)
+    bool importprojectdata(nndb* db, const std::string& project, bool& critical)
     {
+        critical = false;
+
         printf("Importing project %s\n", project.c_str());
 
         std::string etag;
 
-        if (!SearchDatabase(db, "ETAG", project, etag))
+        if (!db->search_table("ETAG", project, etag))
         {
-            _log(NN_ERROR, "importprojectdata", "Failed to find etag for project <project=" + project + ">");
+            _log(NN, ERROR, "importprojectdata", "Failed to find etag for project <project=" + project + ">");
 
             return false;
         }
 
         // Drop previous table for project as we are fresh syncing this project from file
 
-        db->drop_query(project);
+        db->drop_table(project);
 
         try
         {
@@ -311,7 +323,7 @@ public:
 
             if (!input_file)
             {
-                _log(NN_ERROR, "importprojectdata", "Unable to open project file <file=" + etag + ".gz>");
+                _log(NN, ERROR, "importprojectdata", "Unable to open project file <file=" + etag + ".gz>");
 
                 return false;
             }
@@ -322,7 +334,9 @@ public:
 
             bool bcomplete = false;
             bool berror = false;
+            int64_t prjrac = 0;
 
+            db->create_table(project);
             while (!bcomplete && !berror)
             {
                 if (bcomplete)
@@ -377,23 +391,24 @@ public:
 
                         if (mCPIDs.count(cpid) != 0)
                         {
-
-                            if (!InsertDatabase(db, project, cpid, rac))
+                            // Make CPID Tables which has to be single transactions
+                            db->create_table(cpid);
+                            if (!db->insert_entry(cpid, project, rac))
                             {
-                                _log(NN_ERROR, "importprojectdata", "Failed to insert into project table with user data <project=" + project + ", cpid=" + cpid + ", rac=" + rac + ">");
+                                _log(NN, ERROR, "importprojectdata", "Failed to insert user data into cpid table <table=" + cpid + ", project=" + project + ", rac=" + rac + ">");
 
-                                continue;
+                                return false;
                             }
 
-                            if (!InsertDatabase(db, cpid, project, rac))
+                            if (!db->insert_entry(project, cpid, rac))
                             {
-                                _log(NN_ERROR, "importprojectdata", "Failed to insert into cpid table with user data <project=" + project + ", cpid=" + cpid + ", rac=" + rac + ">");
+                                    _log(NN, ERROR, "importprojectdata", "Failed to insert user data into project table <table=" + project + ", cpid=" + cpid + ", rac=" + rac + ">");
 
-                                // If this fails but last past we need to remove that data
-                                db->delete_query(project, cpid);
+                                    return false;
 
-                                continue;
                             }
+
+                            prjrac += std::stod(rac);
 
                             // Success
                             continue;
@@ -401,6 +416,9 @@ public:
                     }
                 }
             }
+
+            // Now that we done store total rac in project table
+            db->insert_entry(project, "TOTALRAC", std::to_string(prjrac));
         }
 
         catch (std::exception& ex)
@@ -440,6 +458,7 @@ bool nn::syncdata()
 
         return false;
     }
+
     int64_t b = time(NULL);
     if (!data.processprojectdata(db))
     {

@@ -1,13 +1,18 @@
 #ifndef LOGGER_H
 #define LOGGER_H
-
+#pragma once
 #include "nnutil.h"
 
 enum logattribute {
-    NN_DEBUG,
-    NN_INFO,
-    NN_WARNING,
-    NN_ERROR
+    DEBUG,
+    INFO,
+    WARNING,
+    ERROR
+};
+
+enum logtype {
+    NN,
+    DB
 };
 
 class nnlogger
@@ -48,7 +53,45 @@ public:
     }
 };
 
-void _log(logattribute eType, const std::string& sCall, const std::string& sMessage)
+class dblogger
+{
+private:
+
+    std::ofstream logfile;
+
+public:
+
+    dblogger()
+    {
+        fs::path plogfile = fs::current_path();
+
+        plogfile /= "nndb.log";
+
+        logfile.open(plogfile.c_str(), std::ios_base::out | std::ios_base::app);
+
+        if (!logfile.is_open())
+            printf("DB : Logging : Failed to open logging file\n");
+    }
+
+    ~dblogger()
+    {
+        if (logfile.is_open())
+        {
+            logfile.flush();
+            logfile.close();
+        }
+    }
+
+    void output(const std::string& tofile)
+    {
+        if (logfile.is_open())
+            logfile << tofile << std::endl;
+
+        return;
+    }
+};
+
+void _log(logtype eLoc, logattribute eType, const std::string& sCall, const std::string& sMessage)
 {
     std::string sType;
 
@@ -56,16 +99,16 @@ void _log(logattribute eType, const std::string& sCall, const std::string& sMess
     {
         switch (eType)
         {
-            case NN_DEBUG:     sType = "DEBUG";    break;
-            case NN_INFO:      sType = "INFO";     break;
-            case NN_WARNING:   sType = "WARNING";  break;
-            case NN_ERROR:     sType = "ERROR";    break;
+            case DEBUG:      sType = "DEBUG";      break;
+            case INFO:       sType = "INFO";       break;
+            case WARNING:    sType = "WARNING";    break;
+            case ERROR:      sType = "ERROR";      break;
         }
     }
 
     catch (std::exception& ex)
     {
-        printf("NN : logger : exception occured in _log function (%s)\n", ex.what());
+        printf("logger : exception occured in _log function (%s)\n", ex.what());
 
         return;
     }
@@ -76,11 +119,19 @@ void _log(logattribute eType, const std::string& sCall, const std::string& sMess
     sOut.ltype(sType);
     sOut.lcall(sCall);
     sOut.append(sMessage);
-    sOut.nl();
 
-    nnlogger log;
+    if (eLoc == NN)
+    {
+        nnlogger nnlog;
 
-    log.output(sOut.value());
+        nnlog.output(sOut.value());
+    }
+    else
+    {
+        dblogger dblog;
+
+        dblog.output(sOut.value());
+    }
 
     return;
 }

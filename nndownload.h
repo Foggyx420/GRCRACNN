@@ -1,5 +1,6 @@
 #ifndef NNDOWNLOAD_H
 #define NNDOWNLOAD_H
+#pragma once
 
 #include "nnutil.h"
 #include "nnlogger.h"
@@ -51,7 +52,7 @@ public:
 
             if(!fp)
             {
-                _log(NN_ERROR, "nncurl_http_download", "Failed to open project file to download project data into <destination=" + destination + ">");
+                _log(NN, ERROR, "nncurl_http_download", "Failed to open project file to download project data into <destination=" + destination + ">");
 
                 return false;
             }
@@ -71,7 +72,7 @@ public:
             // Above code 399 is error for client/server
             if (http_code >= 400)
             {
-                _log(NN_ERROR, "nncurl_http_download", "HTTP response code for project file <urlfile=" + url + "> (" + std::to_string(http_code) + ")");
+                _log(NN, ERROR, "nncurl_http_download", "HTTP response code for project file <urlfile=" + url + "> (" + std::to_string(http_code) + ")");
 
                 try
                 {
@@ -80,7 +81,7 @@ public:
 
                 catch (std::exception& ex)
                 {
-                    _log(NN_ERROR, "nncurl_http_download", "Failed to remove file <file=" + destination + "> (" + std::string(ex.what()) + ")");
+                    _log(NN, ERROR, "nncurl_http_download", "Failed to remove file <file=" + destination + "> (" + std::string(ex.what()) + ")");
                 }
 
                 return false;
@@ -88,7 +89,7 @@ public:
 
             if (res > 0)
             {
-                _log(NN_ERROR, "nncurl_http_download", "Failed to download project file <urlfile=" + url + "> (" + curl_easy_strerror(res) + ")");
+                _log(NN, ERROR, "nncurl_http_download", "Failed to download project file <urlfile=" + url + "> (" + curl_easy_strerror(res) + ")");
 
                 try
                 {
@@ -97,7 +98,7 @@ public:
 
                 catch (std::exception& ex)
                 {
-                    _log(NN_ERROR, "nncurl_http_download", "Failed to remove file <file=" + destination + "> (" + std::string(ex.what()) + ")");
+                    _log(NN, ERROR, "nncurl_http_download", "Failed to remove file <file=" + destination + "> (" + std::string(ex.what()) + ")");
                 }
 
                 return false;
@@ -109,7 +110,7 @@ public:
 
         catch (std::exception& ex)
         {
-            _log(NN_ERROR, "nncurl_http_download", "Std exception occured (" + std::string(ex.what()) + ")");
+            _log(NN, ERROR, "nncurl_http_download", "Std exception occured (" + std::string(ex.what()) + ")");
 
             return false;
         }
@@ -142,7 +143,7 @@ public:
 
         if (res > 0)
         {
-            _log(NN_ERROR, "nncurl_http_header", "Failed to capture header of project file <urlfile=" + url + ">");
+            _log(NN, ERROR, "nncurl_http_header", "Failed to capture header of project file <urlfile=" + url + ">");
 
             return false;
         }
@@ -150,7 +151,7 @@ public:
         // Above code 399 is error for client/server
         if (http_code >= 400)
         {
-            _log(NN_ERROR, "nncurl_http_download", "HTTP response code for project file <urlfile=" + url + "> (" + std::to_string(http_code) + ")");
+            _log(NN, ERROR, "nncurl_http_download", "HTTP response code for project file <urlfile=" + url + "> (" + std::to_string(http_code) + ")");
 
             return false;
         }
@@ -176,12 +177,12 @@ public:
 
         if (etag.empty())
         {
-            _log(NN_ERROR, "nncurl_http_header", "Failed to capture ETag for project url <urlfile=" + url + ">");
+            _log(NN, ERROR, "nncurl_http_header", "Failed to capture ETag for project url <urlfile=" + url + ">");
 
             return false;
         }
 
-        _log(NN_INFO, "nncurl_http_header", "Captured ETag for project url <urlfile=" + url + ", ETag=" + etag + ">");
+        _log(NN, INFO, "nncurl_http_header", "Captured ETag for project url <urlfile=" + url + ", ETag=" + etag + ">");
 
         return true;
     }

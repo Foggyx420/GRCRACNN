@@ -1,10 +1,13 @@
 #ifndef NNDB_H
 #define NNDB_H
+#pragma once
 
 #include "nnlogger.h"
 #include <sqlite3.h>
 #include <unordered_set>
-#include <iterator>
+#include <unordered_map>
+#include <vector>
+#include <cstring>
 
 /* Conform to a basic layout for maximum camptiablility while keeping functions short and sweet
  * We will store by type with two values
@@ -25,28 +28,20 @@ class nndb
 {
 private:
 
+    // Vars
     bool dbopen = false;
     sqlite3* db = nullptr;
     int res = 0;
     sqlite3_stmt* stmt = nullptr;
     std::string nndbfile = "nn.db";
     bool dbbusy = false;
+    char* err = NULL;
+    char* tail = NULL;
 
-public:
-
-    nndb()
-    {
-        open_db();
-    }
-
-    ~nndb()
-    {
-        close_db();
-    }
-
+    // Functions
     void open_db()
     {
-        if (db != nullptr)
+        if (!dbopen && db != nullptr)
             db == nullptr;
 
         bool exists = false;
@@ -60,25 +55,29 @@ public:
         {
             dbopen = false;
 
-            _log(NN_ERROR, "nndb", "sqlite error occured while opening database (" + std::string(sqlite3_errstr(res)) + ")");
+            _log(DB, ERROR, "open_db", "sqlite error occured while opening database (" + std::string(sqlite3_errstr(res)) + ")");
         }
 
-        _log(NN_INFO, "nndb", "Database is being opened by request");
+        _log(DB, INFO, "open_db", "Database is being opened by request");
 
         dbopen = true;
 
         if (!exists)
-            enable_dbproperties();
+            settings_db();
+
+        startup_db();
     }
 
     void close_db()
     {
+        vacuum_db();
+
         res = sqlite3_close_v2(db);
 
-        _log(NN_INFO, "nndb", "Database is being closed by request");
+        _log(DB, INFO, "close_db", "Database is being closed by request");
 
         if (res)
-            _log(NN_ERROR, "nndb", "sqlite error occured while closing database (" + std::string(sqlite3_errstr(res)) + ")");
+            _log(DB, ERROR, "close_db", "sqlite error occured while closing database (" + std::string(sqlite3_errstr(res)) + ")");
 
         else
         {
@@ -88,93 +87,136 @@ public:
         }
     }
 
-    bool isopen_db()
-    {
-        return dbopen;
-    }
-
     bool reopen_db()
     {
         // Refresh and reopen database
         // If db is closed for whatever reason lets reopen it
-        _log(NN_WARNING, "nndb", "Database is being requested to be reopened");
+        _log(DB, WARNING, "reopen_db", "Database is being requested to be reopened");
 
         open_db();
 
         if (isopen_db())
+        {
+            _log(DB, INFO, "reopen_db", "Successfully reopened database");
+
             return true;
+        }
 
         else
+        {
+            _log(DB, ERROR, "reopen_db", "Failed to reopen database");
+
             return false;
+        }
     }
 
-    void enable_dbproperties()
+    void settings_db()
     {
-        // auto_vacuum is set to 2 so we call when to do the vacuum of the database; full mode is performance impacting
-        // syncrhronous when ON will so this every addition to database. This kills performance. results 21mins to < 1 mins
+        // PRAGMA auto_vacuum is set to 2 so we call when to do the vacuum of the database; full mode is performance impacting
+        // PRAGMA syncrhronous when ON will so this every addition to database. This kills performance. results 21mins to < 1 mins
+        // PRAGMA CACHE_SIZE is default -2000 however results online from testing show setting to -500 increases performance on windows only
         std::unordered_set<std::string> properties;
         properties.insert("PRAGMA auto_vacuum = 2;");
         properties.insert("PRAGMA synchronous = OFF;");
+        properties.insert("PRAGMA temp_store = 2;");
+        properties.insert("PRAGMA locking_mode = EXCLUSIVE;");
+        properties.insert("PRAGMA automatic_index = FALSE;");
+        properties.insert("PRAGMA threads = 255;");
+        properties.insert("PRAGMA journal_mode = WAL;");
 
         for (const auto& p : properties)
         {
             std::string query = p;
 
-
             sqlite3_prepare_v2(db, query.c_str(), query.size(), &stmt, NULL);
 
             sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
         }
     }
 
-    bool insert_query(bool table, const std::string& querystring)
+    void startup_db()
+    {
+        // This must be set each time the db is loaded
+        std::string query = "PRAGMA CACHE_SIZE = -10000;";
+
+        sqlite3_prepare_v2(db, query.c_str(), query.size(), &stmt, NULL);
+
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+
+        std::string queryb = "PRAGMA threads = 255;";
+
+        sqlite3_prepare_v2(db, queryb.c_str(), queryb.size(), &stmt, NULL);
+
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
+
+public:
+
+    nndb()
+    {
+        open_db();
+    }
+
+    ~nndb()
+    {
+        close_db();
+    }
+
+    // Functions
+    bool isopen_db()
+    {
+        return dbopen;
+    }
+
+    void vacuum_db()
     {
         if (!dbopen)
-        {
-            if (reopen_db())
-                _log(NN_INFO, "nndb_insert_query", "Database successfully reopened");
+            if (!reopen_db())
+                return;
 
-            else
-            {
-                _log(NN_ERROR, "nndb_insert_query", "Database was not successfully reopened");
+        std::string query = "VACUUM;";
 
+        sqlite3_prepare_v2(db, query.c_str(), query.size(), &stmt, NULL);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+
+        return;
+    }
+
+    void create_table(const std::string& table)
+    {
+        if (!dbopen)
+            if (!reopen_db())
+                return;
+
+        std::string query = "CREATE TABLE IF NOT EXISTS '" + table  + "' (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);";
+
+        sqlite3_prepare_v2(db, query.c_str(), query.size(), &stmt, NULL);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+
+        return;
+    }
+
+    bool search_table(const std::string& table, const std::string& key, std::string& value)
+    {
+        if (!dbopen)
+            if (!reopen_db())
                 return false;
-            }
-        }
 
-
-        sqlite3_prepare_v2(db, querystring.c_str(), querystring.size(), &stmt, NULL);
-
-        res = sqlite3_step(stmt);
-
-        if (!table && res != SQLITE_DONE)
+        if (table.empty() || key.empty())
         {
-            sqlite3_finalize(stmt);
+            _log(DB, ERROR, "search_table", "Parameters cannot be empty; <table=" + table + ", key=" + key + ">");
 
             return false;
         }
 
-        sqlite3_finalize(stmt);
+        std::string query = "SELECT value FROM '" + table + "' WHERE key = '" + key + "';";
 
-        return true;
-    }
-
-    bool search_query(const std::string& searchquery, std::string& value)
-    {
-        if (!dbopen)
-        {
-            if (reopen_db())
-                _log(NN_INFO, "nndb_search_query", "Database successfully reopened");
-
-            else
-            {
-                _log(NN_ERROR, "nndb_search_query", "Database was not successfully reopened");
-
-                return false;
-            }
-        }
-
-        sqlite3_prepare_v2(db, searchquery.c_str(), searchquery.size(), &stmt, NULL);
+        sqlite3_prepare_v2(db, query.c_str(), query.size(), &stmt, NULL);
 
         try
         {
@@ -190,7 +232,7 @@ public:
 
         catch (std::bad_cast &ex)
         {
-            _log(NN_DEBUG, "nndb_search_query", "Cast exception for <query=" + searchquery + "> (" + ex.what() + ")");
+            _log(DB, DEBUG, "search_table", "Cast exception for <table=" + table + ", query=" + query + "> (" + ex.what() + ")");
         }
 
         sqlite3_finalize(stmt);
@@ -198,19 +240,17 @@ public:
         return false;
     }
 
-    void drop_query(const std::string& table)
+    void drop_table(const std::string& table)
     {
         if (!dbopen)
-        {
-            if (reopen_db())
-                _log(NN_INFO, "nndb_drop_query", "Database successfully reopened");
-
-            else
-            {
-                _log(NN_ERROR, "nndb_drop_query", "Database was not successfully reopened");
-
+            if (!reopen_db())
                 return;
-            }
+
+        if (table.empty())
+        {
+            _log(DB, ERROR, "drop_table", "Parameters cannot be empty; <table=" + table + ">");
+
+            return;
         }
 
         std::string dropquery = "DROP TABLE IF EXISTS '" + table + "';";
@@ -218,21 +258,98 @@ public:
         sqlite3_prepare_v2(db, dropquery.c_str(), dropquery.size(), &stmt, NULL);
 
         sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+
+        vacuum_db();
     }
 
-    void delete_query(const std::string& table, const std::string& key)
+    bool insert_entry(const std::string& table, const std::string& key, const std::string& value)
     {
         if (!dbopen)
+            if (!reopen_db())
+                return false;
+
+        if (table.empty() || key.empty() || value.empty())
         {
-            if (reopen_db())
-                _log(NN_INFO, "nndb_delete_query", "Database successfully reopened");
+            _log(DB, ERROR, "insert_entry", "Parameters cannot be empty; <table=" + table + ", key=" + key + ", value=" + value + ">");
 
-            else
-            {
-                _log(NN_ERROR, "nndb_delete_query", "Database was not successfully reopened");
+            return false;
+        }
 
+        std::string entry = "INSERT OR REPLACE INTO '" + table + "' VALUES('" + key + "', '" + value + "');";
+
+        sqlite3_prepare_v2(db, entry.c_str(), entry.size(), &stmt, NULL);
+
+        res = sqlite3_step(stmt);
+
+        if (res != SQLITE_DONE)
+        {
+            sqlite3_finalize(stmt);
+
+            return false;
+        }
+
+        sqlite3_finalize(stmt);
+
+        return true;
+    }
+
+    bool insert_bulk_entry(const std::string project, const std::vector<std::pair<std::string, std::string>>& data)
+    {
+        if (!dbopen)
+            if (!reopen_db())
+                return false;
+
+        if (project.empty() || data.empty())
+        {
+            _log(DB, ERROR, "insert_bulk_entry", "Parameters cannot be empty; <table=" + project + ", data.size=" + std::to_string(data.size()) + ">");
+
+            return false;
+        }
+
+        std::string entry;
+
+        entry = "INSERT OR REPLACE INTO '" + project + "' VALUES('@key', '@value');";
+
+        sqlite3_prepare_v2(db, entry.c_str(), -1, &stmt, NULL);
+        sqlite3_exec(db, "BEGIN TRANSACTION", NULL, NULL, &err);
+
+        for (auto const& d : data)
+        {
+            std::string cpid = d.first + "\t";
+            std::string rac = d.second + "\t";
+
+            sqlite3_bind_text(stmt, 0, cpid.c_str(), -1, SQLITE_STATIC);
+            sqlite3_bind_text(stmt, 1, rac.c_str(), -1, SQLITE_STATIC);
+            sqlite3_step(stmt);
+            sqlite3_clear_bindings(stmt);
+            sqlite3_reset(stmt);
+        }
+
+        sqlite3_exec(db, "END TRANSACTION", NULL, NULL, &err);
+        //sqlite3_finalize(stmt);
+        if (err != NULL)
+        {
+            _log(DB, ERROR, "insert_bulk_entry", "Error while inserting bulk project data (" + std::string(err) + ")");
+
+            return false;
+        }
+
+        else
+            return true;
+    }
+
+    void delete_entry(const std::string& table, const std::string& key)
+    {
+        if (!dbopen)
+            if (!reopen_db())
                 return;
-            }
+
+        if (table.empty() || key.empty())
+        {
+            _log(DB, ERROR, "delete_entry", "Parameters cannot be empty; <table=" + table + ", key=" + key + ">");
+
+            return;
         }
 
         std::string dropquery = "DELETE FROM TABLE IF EXISTS '" + table + "' WHERE key = '" + key + "';";
@@ -240,63 +357,8 @@ public:
         sqlite3_prepare_v2(db, dropquery.c_str(), dropquery.size(), &stmt, NULL);
 
         sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
     }
 };
-
-bool SearchDatabase(nndb* db, const std::string& sTable, const std::string& sKey, std::string& sValue)
-{
-    if (sTable.empty() || sKey.empty())
-    {
-        _log(NN_ERROR, "SearchDatabase", "Arguements cannot be empty. Programming ERROR. <table=" + sTable + ", key=" + sKey + ">");
-
-        return false;
-    }
-
-    std::string sSearchQuery;
-
-    sSearchQuery = "SELECT value FROM '" + sTable + "' WHERE key = '" + sKey + "';";
-
-    if (db->search_query(sSearchQuery, sValue))
-        return true;
-
-    else
-    {
-        _log(NN_WARNING, "SearchDatabase", "No result found <table=" + sTable + ", key=" + sKey + ">");
-
-        return false;
-    }
-}
-
-bool InsertDatabase(nndb* db, const std::string& sTable, const std::string& sKey, const std::string& sValue)
-{
-    if (sValue.empty() || sTable.empty() || sKey.empty())
-    {
-        _log(NN_ERROR, "InsertDatabase", "Arguements cannot be empty. Programming ERROR. <table=" + sTable + ", key=" + sKey + ", valuea=" + sValue + ">");
-
-        return false;
-    }
-
-    std::string sInsertQuery;
-
-    sInsertQuery = "CREATE TABLE IF NOT EXISTS '" + sTable + "' (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);";
-
-    if (!db->insert_query(true, sInsertQuery))
-    {
-        _log(NN_ERROR, "InsertDatabase", "Failed to insert into database <table=" + sTable + ", query=" + sInsertQuery + ">");
-
-        return false;
-    }
-
-    sInsertQuery = "INSERT OR REPLACE INTO '" + sTable + "' VALUES('" + sKey + "', '" + sValue + "');";
-
-    if (!db->insert_query(false, sInsertQuery))
-    {
-        _log(NN_ERROR, "InsertDatabase", "Failed to insert into database <table=" + sTable + ", query=" + sInsertQuery + ">");
-
-        return false;
-    }
-
-    return true;
-}
 
 #endif // NNDB_H

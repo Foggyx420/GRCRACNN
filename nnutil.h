@@ -1,5 +1,6 @@
 #ifndef NNUTIL_H
 #define NNUTIL_H
+#pragma once
 
 #include <string>
 #include <sstream>

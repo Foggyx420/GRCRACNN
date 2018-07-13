@@ -18,6 +18,8 @@ private:
     std::string header;
     long http_code;
     CURLcode res;
+    uintmax_t filesize;
+    std::string etag;
 
     static size_t writeheader(void* ptr, size_t size, size_t nmemb, void* userp)
     {
@@ -43,16 +45,40 @@ public:
             curl_easy_cleanup(curl);
     }
 
-    bool http_download(const std::string& url, const std::string& destination)
+    void reset()
+    {
+        curl_easy_reset(curl);
+    }
+
+    void clear()
+    {
+        buffer = "";
+        header = "";
+        http_code = 0;
+        filesize = 0;
+        etag = "";
+    }
+
+    uintmax_t gzfilesize()
+    {
+        return filesize;
+    }
+
+    std::string gzfileetag()
+    {
+        return etag;
+    }
+
+    bool http_download(const std::string& url)
     {
         try {
             FILE* fp;
 
-            fp = fopen(destination.c_str(), "wb");
+            fp = fopen(ETagFile(etag).c_str(), "wb");
 
             if(!fp)
             {
-                _log(NN, ERROR, "nncurl_http_download", "Failed to open project file to download project data into <destination=" + destination + ">");
+                _log(NN, ERROR, "nncurl_http_download", "Failed to open project file to download project data into <destination=" + etag + ">");
 
                 return false;
             }
@@ -69,36 +95,54 @@ public:
 
             curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 
+            // TODO: consider if its a 401 and need centralized access we call scraper for this  alone.
             // Above code 399 is error for client/server
             if (http_code >= 400)
             {
-                _log(NN, ERROR, "nncurl_http_download", "HTTP response code for project file <urlfile=" + url + "> (" + std::to_string(http_code) + ")");
+                _log(NN, ERROR, "nncurl_http_download", "HTTP response code for project file <urlfile=" + url + "> (" + logstr(http_code) + ")");
 
                 try
                 {
-                    fs::remove(destination.c_str());
+                    fs::remove(ETagFile(etag).c_str());
                 }
 
                 catch (std::exception& ex)
                 {
-                    _log(NN, ERROR, "nncurl_http_download", "Failed to remove file <file=" + destination + "> (" + std::string(ex.what()) + ")");
+                    _log(NN, ERROR, "nncurl_http_download", "Failed to remove file <file=" + etag + "> (" + logstr(ex.what()) + ")");
                 }
 
                 return false;
             }
 
-            if (res > 0)
+            if (res)
             {
                 _log(NN, ERROR, "nncurl_http_download", "Failed to download project file <urlfile=" + url + "> (" + curl_easy_strerror(res) + ")");
 
                 try
                 {
-                    fs::remove(destination.c_str());
+                    fs::remove(ETagFile(etag).c_str());
                 }
 
                 catch (std::exception& ex)
                 {
-                    _log(NN, ERROR, "nncurl_http_download", "Failed to remove file <file=" + destination + "> (" + std::string(ex.what()) + ")");
+                    _log(NN, ERROR, "nncurl_http_download", "Failed to remove file <file=" + etag + "> (" + logstr(ex.what()) + ")");
+                }
+
+                return false;
+            }
+
+            if (fs::file_size(ETagFile(etag).c_str()) != filesize)
+            {
+                _log(NN, ERROR, "nncurl_http_download", "Failed to download project file; File size mismatch: server header reported %" + logstr(filesize) + " but download size is " + logstr(fs::file_size(ETagFile(etag).c_str())) + " <urlfile=" + url + "> (" + curl_easy_strerror(res) + ")");
+
+                try
+                {
+                    fs::remove(ETagFile(etag));
+                }
+
+                catch (std::exception& ex)
+                {
+                    _log(NN, ERROR, "nncurl_http_download", "Failed to remove file <file=" + ETagFile(etag) + "> (" + logstr(ex.what()) + ")");
                 }
 
                 return false;
@@ -110,13 +154,13 @@ public:
 
         catch (std::exception& ex)
         {
-            _log(NN, ERROR, "nncurl_http_download", "Std exception occured (" + std::string(ex.what()) + ")");
+            _log(NN, ERROR, "nncurl_http_download", "Std exception occured (" + logstr(ex.what()) + ")");
 
             return false;
         }
     }
 
-    bool http_header(const std::string& url, std::string& etag)
+    bool http_header(const std::string& url)
     {
         struct curl_slist* headers = NULL;
 
@@ -141,7 +185,7 @@ public:
 
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 
-        if (res > 0)
+        if (res)
         {
             _log(NN, ERROR, "nncurl_http_header", "Failed to capture header of project file <urlfile=" + url + ">");
 
@@ -151,7 +195,7 @@ public:
         // Above code 399 is error for client/server
         if (http_code >= 400)
         {
-            _log(NN, ERROR, "nncurl_http_download", "HTTP response code for project file <urlfile=" + url + "> (" + std::to_string(http_code) + ")");
+            _log(NN, ERROR, "nncurl_http_download", "HTTP response code for project file <urlfile=" + url + "> (" + logstr(http_code) + ")");
 
             return false;
         }
@@ -162,17 +206,22 @@ public:
         {
             if (line.find("ETag: ") != std::string::npos)
             {
-                size_t pos;
+                size_t posa = line.find('"');
 
-                std::string modstring = line;
+                std::string modstring = line.substr(posa + 1);
 
-                pos = modstring.find("ETag: ");
+                size_t posb = modstring.find('"');
 
-                etag = modstring.substr(pos + 6, modstring.size());
-
-                etag = etag.substr(1, etag.size() - 3);
+                etag = modstring.substr(0, posb);
             }
 
+            if (line.find("Content-Length: ") != std::string::npos)
+            {
+                std::string modstring = line.substr(16, line.size() - 16);
+
+                if (!modstring.empty())
+                    filesize = std::stoi(line.substr(16, line.size() - 16));
+            }
         }
 
         if (etag.empty())
@@ -182,7 +231,14 @@ public:
             return false;
         }
 
-        _log(NN, INFO, "nncurl_http_header", "Captured ETag for project url <urlfile=" + url + ", ETag=" + etag + ">");
+        if (filesize == 0)
+        {
+            _log(NN, ERROR, "nncurl_http_header", "Failed to capture filesize for project url <urlfile=" + url + ">");
+
+            return false;
+        }
+
+        _log(NN, INFO, "nncurl_http_header", "Captured ETag for project url <urlfile=" + url + ", ETag=" + etag + ", size=" + logstr(filesize) + ">");
 
         return true;
     }

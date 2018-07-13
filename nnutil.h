@@ -12,6 +12,7 @@
 #include <inttypes.h>
 #include <unordered_set>
 #include <unordered_map>
+#include <boost/endian/arithmetic.hpp>
 
 namespace fs = std::experimental::filesystem;
 
@@ -42,6 +43,16 @@ public:
     void append(int64_t value)
     {
         builtstring << value;
+    }
+
+    void semicolon()
+    {
+        builtstring << ";";
+    }
+
+    void comma()
+    {
+        builtstring << ",";
     }
 
     void oxml(const std::string& value)
@@ -80,44 +91,8 @@ public:
     }
 };
 
-fs::path NNPath()
-{
-    // TODO read from gridcoin config to allow custom location
-
-    fs::path path = fs::current_path() / "NeuralNode";
-
-    // Path don't exist then use default location
-    if (!fs::exists(path))
-    {
-        path = fs::current_path() / "NeuralNode";
-
-        return path;
-    }
-
-    else
-        return path;
-}
-
-std::string NNPathStr()
-{
-    // TODO read from gridcoin config to allow custom location
-
-    fs::path path = fs::current_path() / "NeuralNode";
-
-    // Path don't exist then use default location
-    if (!fs::exists(path))
-    {
-        path = fs::current_path() / "NeuralNode";
-
-        return path.string();
-    }
-
-    else
-        return path.string();
-}
-
 // Copied from gridcoin
-std::string extractxml(const std::string& xmldata, const std::string& key, const std::string& key_end)
+std::string ExtractXML(const std::string& xmldata, const std::string& key, const std::string& key_end)
 {
 
     std::string extraction = "";
@@ -134,26 +109,72 @@ std::string extractxml(const std::string& xmldata, const std::string& key, const
     return extraction;
 }
 
-/*{
-std::unordered_map<std::string, std::string> storeinmap(const std::string& s, const std)
+double Round(double d, int place)
+{
+    const double accuracy = std::pow(10, place);
+    return std::round(d * accuracy) / accuracy;
+}
+
+
+fs::path NNPath()
+{
+    // TODO read from gridcoin config to allow custom location
+
+    fs::path path = fs::current_path() / "NeuralNode";
+
+    // Path don't exist then use default location
+    if (!fs::exists(path))
+        fs::create_directory(path);
+
+    return path;
+}
+
+std::string NNPathStr()
+{
+    // TODO read from gridcoin config to allow custom location
+
+    fs::path path = fs::current_path() / "NeuralNode";
+
+    // Path don't exist then use default location
+    if (!fs::exists(path))
+        fs::create_directory(path);
+
+        return path.string();
+}
+
+std::string ETagFile(const std::string& etag)
+{
+    return NNPathStr() + "/" + etag + ".gz";
+}
+
+double shave(double d, int place)
+{
+    std::string str = std::to_string(d);
+
+    size_t pos = str.find(".");
+
+    str = str.substr(0, pos + place + 1);
+
+    return std::stod(str);
 
 }
-std::unordered_map<std::pair<std::string, std::string>> split(const std::string& s, const std::string& delim)
+
+std::vector<std::string> split(const std::string& s, const std::string& delim)
 {
     size_t pos = 0;
     size_t end = 0;
-    std::unordered_map<std::pair<std::string, std::string>> elems;
+    std::vector<std::string> elems;
 
-    while ((end = s.find(delim, pos)) != std::string::npos)
+    while((end = s.find(delim, pos)) != std::string::npos)
     {
-        elems.insert(s.substr(pos, end - pos));
+        elems.push_back(s.substr(pos, end - pos));
         pos = end + delim.size();
     }
 
     // Append final value
-    elems.insert(s.substr(pos, end - pos));
-
+    elems.push_back(s.substr(pos, end - pos));
     return elems;
 }
-*/
+
+
 #endif // NNUTIL_H

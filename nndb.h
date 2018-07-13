@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <vector>
 #include <cstring>
-
+#include "../Gridcoin-Research/src/contract/superblock.h"
 /* Conform to a basic layout for maximum camptiablility while keeping functions short and sweet
  * We will store by type with two values
  *
@@ -31,6 +31,7 @@ private:
     // Vars
     bool dbopen = false;
     sqlite3* db = nullptr;
+    const char* z = NULL;
     int res = 0;
     sqlite3_stmt* stmt = nullptr;
     std::string nndbfile = "nn.db";
@@ -39,6 +40,14 @@ private:
     char* tail = NULL;
 
     // Functions
+/*    static int callback(void *count, int argc, char **argv, char **azColName) {
+        int *c = count;
+
+        *c = atoi(argv[0]);
+
+        return 0;
+    }
+*/
     void open_db()
     {
         if (!dbopen && db != nullptr)
@@ -112,9 +121,6 @@ private:
 
     void settings_db()
     {
-        // PRAGMA auto_vacuum is set to 2 so we call when to do the vacuum of the database; full mode is performance impacting
-        // PRAGMA syncrhronous when ON will so this every addition to database. This kills performance. results 21mins to < 1 mins
-        // PRAGMA CACHE_SIZE is default -2000 however results online from testing show setting to -500 increases performance on windows only
         std::unordered_set<std::string> properties;
         properties.insert("PRAGMA auto_vacuum = 2;");
         properties.insert("PRAGMA synchronous = OFF;");
@@ -123,6 +129,8 @@ private:
         properties.insert("PRAGMA automatic_index = FALSE;");
         properties.insert("PRAGMA threads = 255;");
         properties.insert("PRAGMA journal_mode = WAL;");
+        properties.insert("PRAGMA wal_autocheckpoint = -1;");
+        properties.insert("PRAGMA wal_checkpoint = PASSIVE;");
 
         for (const auto& p : properties)
         {
@@ -138,16 +146,7 @@ private:
     void startup_db()
     {
         // This must be set each time the db is loaded
-        std::string query = "PRAGMA CACHE_SIZE = -10000;";
-
-        sqlite3_prepare_v2(db, query.c_str(), query.size(), &stmt, NULL);
-
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-
-        std::string queryb = "PRAGMA threads = 255;";
-
-        sqlite3_prepare_v2(db, queryb.c_str(), queryb.size(), &stmt, NULL);
+        sqlite3_prepare_v2(db, "PRAGMA cache_size = -10000;", -1, &stmt, NULL);
 
         sqlite3_step(stmt);
         sqlite3_finalize(stmt);
@@ -177,13 +176,43 @@ public:
             if (!reopen_db())
                 return;
 
+        _log(DB, INFO, "vacuum_db", "Vacuum of database has been requested");
+
         std::string query = "VACUUM;";
+        int64_t u = time(NULL);
 
         sqlite3_prepare_v2(db, query.c_str(), query.size(), &stmt, NULL);
         sqlite3_step(stmt);
         sqlite3_finalize(stmt);
 
+        _log(DB, INFO, "vacuum_db", "Vacuum of data completed in " + logstr(time(NULL) - u) + " seconds");
+
         return;
+    }
+
+    void checkpoint_db()
+    {
+        if (!dbopen)
+            if (!reopen_db())
+                return;
+
+        int walframeesize;
+        int walframeschk;
+
+        _log(DB, INFO, "checkpoint_db", "Checkpoint has been requested");
+
+        int64_t u = time(NULL);
+
+        res = sqlite3_wal_checkpoint_v2(db, z, SQLITE_CHECKPOINT_TRUNCATE, &walframeesize, &walframeschk);
+
+        if (res)
+        {
+            _log(DB, WARNING, "checkpoint_db", "Sqlite returned a result code during checkpoint (" + std::string(sqlite3_errstr(res)) + ")");
+
+            return;
+        }
+
+        _log(DB, INFO, "checkpoint_db", "Successfully checkpointed in " + logstr(time(NULL) - u) + " seconds");
     }
 
     void create_table(const std::string& table)
@@ -201,7 +230,7 @@ public:
         return;
     }
 
-    bool search_table(const std::string& table, const std::string& key, std::string& value)
+    bool search_table(const std::string& table, const std::string& key, std::string& value, bool emptyok = false)
     {
         if (!dbopen)
             if (!reopen_db())
@@ -225,9 +254,9 @@ public:
                 value = (const char*)sqlite3_column_text(stmt, 0);
 
                 sqlite3_finalize(stmt);
-
-                return true;
             }
+
+            return true;
         }
 
         catch (std::bad_cast &ex)
@@ -238,6 +267,89 @@ public:
         sqlite3_finalize(stmt);
 
         return false;
+    }
+
+    int get_row_count(const std::string& table)
+    {
+        if (!dbopen)
+            if (!reopen_db())
+                return false;
+
+        if (table.empty())
+        {
+            _log(DB, ERROR, "get_row_count", "Parameters cannot be empty; <table=" + table + ">");
+
+            return false;
+        }
+
+        int count = 0;
+
+        std::string query = "SELECT COUNT(*) FROM '" + table + "';";
+
+        //res = sqlite3_exec(db, query.c_str(), callback, &count, NULL);
+        sqlite3_prepare_v2(db, query.c_str(), query.size(), &stmt, NULL);
+
+        try
+        {
+            if (sqlite3_step(stmt) != SQLITE_OK)
+            {
+                count = sqlite3_column_int(stmt, 0);
+
+                sqlite3_finalize(stmt);
+
+                return count;
+            }
+        }
+
+        catch (std::bad_cast &ex)
+        {
+            _log(DB, DEBUG, "get_row_count", "Cast exception for <table=" + table + "> (" + logstr(ex.what()) + ")");
+        }
+
+        sqlite3_finalize(stmt);
+
+        return 0;
+    }
+
+    bool search_raw_table(const std::string& table, int row, std::string& key, std::string& value)
+    {
+        if (!dbopen)
+            if (!reopen_db())
+                return false;
+
+        if (table.empty() || row == 0)
+        {
+            _log(DB, ERROR, "search_raw_table", "Parameters cannot be empty; <table=" + table + ", row=" + logstr(row) + ">");
+
+            return false;
+        }
+
+        std::string query = "SELECT key,value FROM '" + table + "' WHERE ROWID='" + std::to_string(row) + "';";
+
+        sqlite3_prepare_v2(db, query.c_str(), query.size(), &stmt, NULL);
+
+        try
+        {
+            if (sqlite3_step(stmt) == SQLITE_ROW)
+            {
+                key = (const char*)sqlite3_column_text(stmt, 0);
+                value = (const char*)sqlite3_column_text(stmt, 1);
+
+                sqlite3_finalize(stmt);
+
+                return true;
+            }
+        }
+
+        catch (std::bad_cast &ex)
+        {
+            _log(DB, DEBUG, "search_raw_table", "Cast exception for <table=" + table + ", row=" + std::to_string(row) + "> (" + logstr(ex.what()) + ")");
+        }
+
+        sqlite3_finalize(stmt);
+
+        return false;
+
     }
 
     void drop_table(const std::string& table)
@@ -314,7 +426,7 @@ public:
         sqlite3_prepare_v2(db, entry.c_str(), -1, &stmt, NULL);
         sqlite3_exec(db, "BEGIN TRANSACTION", NULL, NULL, &err);
 
-        for (auto const& d : data)
+        for (const auto& d : data)
         {
             std::string cpid = d.first + "\t";
             std::string rac = d.second + "\t";

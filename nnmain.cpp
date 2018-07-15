@@ -13,7 +13,7 @@
 #include <zlib.h>
 
 // Move once porting to gridcoin
-std::string ExtractValueFromVector(const std::vector<std::string>& data, const std::string& key);
+double ExtractValueFromVector(const std::vector<std::string>& data, const std::string& key);
 
 // Dummy testing
 std::vector<std::pair<std::string, std::string>> vWhitelist;
@@ -85,7 +85,7 @@ void setdummy()
 }
 
 // Return just the data we need and move to util once in gridcoin so it works there
-std::string ExtractValueFromVector(const std::vector<std::string>& data, const std::string& key)
+double ExtractValueFromVector(const std::vector<std::string>& data, const std::string& key)
 {
     for (const auto& search : data)
     {
@@ -94,11 +94,19 @@ std::string ExtractValueFromVector(const std::vector<std::string>& data, const s
             // Found Data return the value of what we looking for ( Key, Value )
             std::vector<std::string> parse = split(search, ",");
 
-            return parse[1];
+            try
+            {
+                return std::stod(parse[1]);
+            }
+
+            catch (std::exception& ex)
+            {
+                return 0;
+            }
         }
     }
 
-    return "";
+    return 0;
 }
 
 namespace boostio = boost::iostreams;
@@ -511,13 +519,11 @@ public:
 
         for (const auto& chkwl : vWhitelist)
         {
-            std::vector<std::string> tchistorydata = split(ExtractXML(dummycontract, "<" + chkwl.first + ">", "</" + chkwl.first + ">"), ";");
-
-            if (tchistorydata.empty())
-                continue;
+            if (dummycontract.find("<" + chkwl.first + ">") != std::string::npos)
+                projectcount++;
 
             else
-                projectcount++;
+                continue;
         }
 
         for (const auto& wl : vWhitelist)
@@ -527,7 +533,7 @@ public:
             printf("*%s\n", wl.first.c_str());
 
             // Pull history data here from dummy contract for testing ADD later on non existence handling.
-            std::vector<std::string> tchistorydata = split(ExtractXML(dummycontract, "<" + wl.first + ">", "</" + wl.first + ">"), ";");
+            std::unordered_map<std::string, double> tchistorydata = splittouomap(ExtractXML(dummycontract, "<" + wl.first + ">", "</" + wl.first + ">"));
 
             // If the results is empty then its a new project in neural network then we just bypass this part
             // TODO figure out a way to now have a magnitude loss for the period. surely this is not the best way !
@@ -551,7 +557,7 @@ public:
                 printf("project %s and rowcount %d\n", wl.first.c_str(), rowcount);
                 if (rowcount == 0)
                 {
-                    _log(NN, INFO, "calcmagsbyproject", "No Previous data for project; ignoring as it likely new project <project=" + wl.first + ", rowcount=" + logstr(rowcount) + ">");
+                    _log(NN, INFO, "calcmagsbyproject", "No data for project; ignoring as it liekly failed to download <project=" + wl.first + ", rowcount=" + logstr(rowcount) + ">");
 
                     continue;
                 }
@@ -561,75 +567,77 @@ public:
                 // Thus the total project credit needs to be changed to reflect that as to not throw off mag calculations considerably
                 // This must be done first and not on the fly
                 // DB work is fast thou gonna do this in a vector
-                std::vector<std::pair<std::string, double>> processedcpids;
+                std::unordered_map<std::string, double> processedcpids;
+                std::unordered_map<std::string, double> tabledata;
 
-                for (int i = 1; i < rowcount; i++)
+                int64_t ts = time(NULL);
+                tabledata = db->table_to_uomap(wl.first);
+                printf("took to uomap database table %" PRId64 "\n", (time(NULL) - ts));
+                if (tabledata.empty())
                 {
-                    std::string pcpid;
-                    std::string pstc;
+                    _log(NN, ERROR, "calcmagsbyproject", "DB error; table for project is empty <project=" + wl.first + ">");
 
-                    if (wl.first == "worldcommunitygrid")
-                        printf("Searching row %d\n", i);
+                    return false;
+                }
 
-                    if (db->search_raw_table(wl.first, i, pcpid, pstc))
-                    {
-                        if (pcpid.empty() || pstc.empty())
-                            continue;
+                for (const auto& map : tabledata)
+                {
+                    std::string pcpid = map.first;
+                    double pstc = map.second;
 
-                        if (pcpid.length() != 32)
-                            continue;
+                    if (pcpid.empty() || pstc == 0)
+                        continue;
 
-                        // Pull previous credit from last sb dummy contract
-                        std::string psoldtc = ExtractValueFromVector(tchistorydata, pcpid);
+                    if (pcpid.length() != 32)
+                        continue;
 
-                        if (psoldtc.empty())
-                        {
-                            // Cpid not in past sb contract
-                            // Adjust the total project credit to not offset mag calculations
-                            // Don't insert into vector to process
-                            // They will join next superblock as the total credit will be stored for the project
+                    // Pull previous credit from last sb dummy contract
+                    double psoldtc = 0;
 
-                            continue;
-                        }
+                    auto tcsearch = tchistorydata.find(pcpid);
 
-                        else
-                        {
-                            if (pstc == psoldtc)
-                            {
-                                // No credit difference don't add to vector for processing of project mag
-                                continue;
-                            }
-
-                            // Place into vector
-                            else
-                            {
-                                double usercreditdiff = std::stod(pstc) - std::stod(psoldtc);
-
-                                if (usercreditdiff <= 0)
-                                {
-                                    printf("noo im less then 00000\n");
-                                    continue;
-                                }
-                                dtotalcredit += usercreditdiff;
-
-                                processedcpids.push_back(std::make_pair(pcpid, usercreditdiff));
-                            }
-                        }
-                    }
+                    if (tcsearch != tchistorydata.end())
+                        psoldtc = tcsearch->second;
 
                     else
                     {
-                        _log(NN, ERROR, "calcmagsbyproject", "DB error while calculating mags by project <project=" + wl.first + ">");
+                        // Cpid not in past sb contract
+                        // Adjust the total project credit to not offset mag calculations
+                        // Don't insert into vector to process
+                        // They will join next superblock as the total credit will be stored for the project
 
-                        return false;
+                        continue;
                     }
 
+                    if (pstc == psoldtc)
+                    {
+                        // No credit difference don't add to vector for processing of project mag
+                        continue;
+                    }
+
+                    // Place into vector
+                    else
+                    {
+                        double usercreditdiff = pstc - psoldtc;
+
+                        if (usercreditdiff <= 0)
+                        {
+                            printf("noo im less then 00000\n");
+                            continue;
+                        }
+
+                        dtotalcredit += usercreditdiff;
+                        processedcpids.insert(std::make_pair(pcpid, usercreditdiff));
+
+                    }
                 }
 
                 // Search each row and produce a magnitude for each user
                 // We have NN multipler of 115000
                 // Whitelist count is used
                 // Total rac is used
+                std::unordered_map<std::string, double> magdata;
+
                 for (const auto& v : processedcpids)
                 {
                     double credit = v.second;
@@ -649,18 +657,20 @@ public:
                     //                        mag = shave(mag, 2);
 
                     //       printf("DEBUG: ROW %d -> cpid %s -> rac %f\n", i, cpid.c_str(), rac);
-                    if (!db->insert_entry("MAGNITUDES-" + wl.first, v.first, std::to_string(mag)))
-                    {
-                        _log(NN, ERROR, "calcmagsbyproject", "Failed to insert into database <project=" + wl.first + ", cpid=" + v.first + ", mag=" + logstr(mag) + ">");
-
-                        db->drop_table("MAGNITUDES-" + wl.first);
-                        db->vacuum_db();
-
-                        break;
-                    }
-
+                    magdata.insert(std::make_pair(v.first, mag));
                 }
 
+                if (!db->insert_bulk_uomap("MAGNITUDES-" + wl.first, magdata))
+
+                //                    if (!db->insert_entry("MAGNITUDES-" + wl.first, v.first, std::to_string(mag)))
+                {
+                    _log(NN, ERROR, "calcmagsbyproject", "Failed to insert into database <project=" + wl.first + ">");
+
+                    db->drop_table("MAGNITUDES-" + wl.first);
+                    db->vacuum_db();
+
+                    break;
+                }
 
                 _log(NN, INFO, "calcmagsbyproject", "Processed Rac for Mag calcuations <project=" + wl.first + ", count=" + logstr(rowcount - 1) + ">");
                 //            }
@@ -968,21 +978,21 @@ bool nn::syncdata()
     nndb* db = new nndb;
 
     int64_t a = time(NULL);
-    if (!data.gatherprojectdata(db))
+/*    if (!data.gatherprojectdata(db))
     {
         db->vacuum_db();
 
         return false;
     }
-
+*/
     int64_t b = time(NULL);
-    if (!data.processprojectdata(db))
+/*    if (!data.processprojectdata(db))
     {
         db->vacuum_db();
 
         return false;
     }
-
+*/
 
     int64_t c = time(NULL);
 
@@ -992,8 +1002,8 @@ bool nn::syncdata()
 
         return false;
     }
-
     int64_t d = time(NULL);
+    /*
 
     if (!data.calctotalmagbycpid(db))
     {
@@ -1001,14 +1011,14 @@ bool nn::syncdata()
 
         return false;
     }
-
+*/
     db->checkpoint_db();
     printf("Tasks completed: downloads took %" PRId64 " seconds; Processing data for db took %" PRId64 " seconds; total time %" PRId64 "\n", b-a, c-b, c-a);
     printf("Processing of mags took %" PRId64 "\n", d-c);
     db->vacuum_db();
 
     int64_t g = time(NULL);
-
+/*
     stringbuilder* sbcontract = new stringbuilder;
 
     std::string contract = data.contract(db);
@@ -1030,6 +1040,7 @@ bool nn::syncdata()
 //    printf("Contract is sized %zu\n", tccontract.size());
 //    printf("SB contract is %s\n", sbcontract->value().c_str());
 //    printf("SB contract size is %zu\n", sbcontract->size());
+*/
     return true;
 }
 

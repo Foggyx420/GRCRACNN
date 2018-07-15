@@ -176,5 +176,37 @@ std::vector<std::string> split(const std::string& s, const std::string& delim)
     return elems;
 }
 
+std::unordered_map<std::string, double> splittouomap(const std::string& s)
+{
+    std::unordered_map<std::string, double> out;
+
+    std::vector<std::string> in = split(s, ";");
+
+    for (const auto& data : in)
+    {
+        std::vector<std::string> filtered = split(data, ",");
+
+        if (data.empty())
+            continue;
+
+        double d = 0;
+
+        try
+        {
+            d = std::stod(filtered[1]);
+            out.insert(std::make_pair(filtered[0], d));
+        }
+
+        catch (std::exception& ex)
+        {
+            // error?
+            out.erase(out.begin(), out.end());
+
+            return out;
+        }
+    }
+
+    return out;
+}
 
 #endif // NNUTIL_H

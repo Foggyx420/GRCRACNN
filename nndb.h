@@ -301,9 +301,10 @@ public:
                 if (stat == SQLITE_ROW)
                 {
                     std::string key = (const char*)sqlite3_column_text(stmt, 0);
-                    std::string value = std::stod((const char*)sqlite3_column_text(stmt, 1));
+                    std::string value = (const char*)sqlite3_column_text(stmt, 1);
+                    double valueout = std::stod(value);
 
-                    uomap.insert(std::make_pair(key, value));
+                    uomap.insert(std::make_pair(key, valueout));
 
                     continue;
                 }
@@ -475,40 +476,43 @@ public:
         return true;
     }
 
-    bool insert_bulk_entry(const std::string project, const std::vector<std::pair<std::string, std::string>>& data)
+    bool insert_bulk_uomap(const std::string table, const std::unordered_map<std::string, double>& data)
     {
         if (!dbopen)
             if (!reopen_db())
                 return false;
 
-        if (project.empty() || data.empty())
+        if (table.empty() || data.empty())
         {
-            _log(DB, ERROR, "insert_bulk_entry", "Parameters cannot be empty; <table=" + project + ", data.size=" + std::to_string(data.size()) + ">");
+            _log(DB, ERROR, "insert_bulk_entry", "Parameters cannot be empty; <table=" + table + ", data.size=" + logstr(data.size()) + ">");
 
             return false;
         }
 
-        std::string entry;
-
-        entry = "INSERT OR REPLACE INTO '" + project + "' VALUES('@key', '@value');";
-
-        sqlite3_prepare_v2(db, entry.c_str(), -1, &stmt, NULL);
+//        sqlite3_prepare_v2(db, entry.c_str(), -1, &stmt, NULL);
+        int64_t t = time(NULL);
         sqlite3_exec(db, "BEGIN TRANSACTION", NULL, NULL, &err);
 
         for (const auto& d : data)
         {
-            std::string cpid = d.first + "\t";
-            std::string rac = d.second + "\t";
+            std::string cpid = d.first;
+            std::string rac = std::to_string(d.second);
 
-            sqlite3_bind_text(stmt, 0, cpid.c_str(), -1, SQLITE_STATIC);
-            sqlite3_bind_text(stmt, 1, rac.c_str(), -1, SQLITE_STATIC);
-            sqlite3_step(stmt);
-            sqlite3_clear_bindings(stmt);
-            sqlite3_reset(stmt);
+            std::string entry;
+
+            entry = "INSERT OR REPLACE INTO '" + table + "' VALUES('" + cpid + "', '" + rac + "');";
+
+            sqlite3_exec(db, entry.c_str(), NULL, NULL, &err);
+
+//            sqlite3_step(stmt);
+//            sqlite3_reset(stmt);
         }
+
+//        sqlite3_finalize(stmt);
 
         sqlite3_exec(db, "END TRANSACTION", NULL, NULL, &err);
         //sqlite3_finalize(stmt);
+        printf("insert_bulk took %" PRId64 "\n", (time(NULL) - t));
         if (err != NULL)
         {
             _log(DB, ERROR, "insert_bulk_entry", "Error while inserting bulk project data (" + std::string(err) + ")");

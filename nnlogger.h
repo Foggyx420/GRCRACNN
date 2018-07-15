@@ -136,4 +136,28 @@ void _log(logtype eLoc, logattribute eType, const std::string& sCall, const std:
     return;
 }
 
+std::string logstr(double value)
+{
+    return std::to_string(value);
+}
+
+std::string logstr(int64_t value)
+{
+    return std::to_string(value);
+}
+
+std::string logstr(int value)
+{
+    return std::to_string(value);
+}
+
+std::string logstr(const char* value)
+{
+    return std::string(value);
+}
+
+std::string logstr(uintmax_t value)
+{
+    return std::to_string(value);
+}
 #endif // LOGGER_H

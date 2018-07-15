@@ -383,6 +383,8 @@ public:
 
         db->drop_table(project);
 
+        std::unordered_map<std::string, double> projectdata;
+
         try
         {
             // GZIP input stream
@@ -455,15 +457,11 @@ public:
 
                         if (mCPIDs.count(cpid) != 0 && cpid.length() == 32)
                         {
-                            if (!db->insert_entry(project, cpid, tc))
-                            {
-                                    _log(NN, ERROR, "importprojectdata", "Failed to insert user data into project table <table=" + project + ", cpid=" + cpid + ", tc=" + tc + ">");
+                            double tcout = std::stod(tc);
 
-                                    return false;
+                            projectdata.insert(std::make_pair(cpid, tcout));
 
-                            }
-
-                            prjtc += std::stod(tc);
+                            prjtc += tcout;
 
                             // Success
                             continue;
@@ -476,8 +474,6 @@ public:
                     return false;
             }
 
-            // Now that we done store total rac in project table
-            db->insert_entry(project, "TOTAL", std::to_string(prjtc));
         }
 
         catch (std::exception& ex)
@@ -490,10 +486,18 @@ public:
             return false;
         }
 
+        // Now that we done push the map into database
+        if (!db->insert_bulk_uomap(project, projectdata))
+        {
+            _log(NN, ERROR, "importprojectdata", "Failed to insert map of project data into database <project=" + project + ">");
+
+            return false;
+        }
+
         return true;
     }
 
-    bool calcmagsbyproject(nndb* db)
+    bool calcmagsbyproject(nndb* db, std::vector<std::pair<std::string, std::unordered_map<std::string, double>>>& data)
     {
         // Iterate each project for said cpid and calculate the magnitude for each user. db contains the total credit and last sb contains previous total credit
         int successcount = 0;
@@ -544,149 +548,125 @@ public:
                 continue;
             }
 
-//            try
-//            {
-                db->drop_table("MAGNITUDES-" + wl.first);
-                db->vacuum_db();
-                db->create_table("MAGNITUDES-" + wl.first);
+            double dtotalcredit = 0;
 
-                double dtotalcredit = 0;
+            int rowcount = db->get_row_count(wl.first);
 
-                int rowcount = db->get_row_count(wl.first);
+            printf("project %s and rowcount %d\n", wl.first.c_str(), rowcount);
+            if (rowcount == 0)
+            {
+                _log(NN, INFO, "calcmagsbyproject", "No data for project; ignoring as it liekly failed to download <project=" + wl.first + ", rowcount=" + logstr(rowcount) + ">");
 
-                printf("project %s and rowcount %d\n", wl.first.c_str(), rowcount);
-                if (rowcount == 0)
+                continue;
+            }
+
+            // CRITICAL SECTION
+            // A New beacon will have a new total credit but the last superblock will not have that data to calculate a mag
+            // Thus the total project credit needs to be changed to reflect that as to not throw off mag calculations considerably
+            // This must be done first and not on the fly
+            // DB work is fast thou gonna do this in a vector
+            std::unordered_map<std::string, double> processedcpids;
+            std::unordered_map<std::string, double> tabledata;
+
+            int64_t ts = time(NULL);
+            tabledata = db->table_to_uomap(wl.first);
+            printf("took to uomap database table %" PRId64 "\n", (time(NULL) - ts));
+            if (tabledata.empty())
+            {
+                _log(NN, ERROR, "calcmagsbyproject", "DB error; table for project is empty <project=" + wl.first + ">");
+
+                return false;
+            }
+
+            for (const auto& map : tabledata)
+            {
+                std::string pcpid = map.first;
+                double pstc = map.second;
+
+                if (pcpid.empty() || pstc == 0)
+                    continue;
+
+                if (pcpid.length() != 32)
+                    continue;
+
+                // Pull previous credit from last sb dummy contract
+                double psoldtc = 0;
+
+                auto tcsearch = tchistorydata.find(pcpid);
+
+                if (tcsearch != tchistorydata.end())
+                    psoldtc = tcsearch->second;
+
+                else
                 {
-                    _log(NN, INFO, "calcmagsbyproject", "No data for project; ignoring as it liekly failed to download <project=" + wl.first + ", rowcount=" + logstr(rowcount) + ">");
+                    // Cpid not in past sb contract
+                    // Adjust the total project credit to not offset mag calculations
+                    // Don't insert into vector to process
+                    // They will join next superblock as the total credit will be stored for the project
 
                     continue;
                 }
 
-                // CRITICAL SECTION
-                // A New beacon will have a new total credit but the last superblock will not have that data to calculate a mag
-                // Thus the total project credit needs to be changed to reflect that as to not throw off mag calculations considerably
-                // This must be done first and not on the fly
-                // DB work is fast thou gonna do this in a vector
-                std::unordered_map<std::string, double> processedcpids;
-                std::unordered_map<std::string, double> tabledata;
-
-                int64_t ts = time(NULL);
-                tabledata = db->table_to_uomap(wl.first);
-                printf("took to uomap database table %" PRId64 "\n", (time(NULL) - ts));
-                if (tabledata.empty())
+                if (pstc == psoldtc)
                 {
-                    _log(NN, ERROR, "calcmagsbyproject", "DB error; table for project is empty <project=" + wl.first + ">");
+                    // No credit difference don't add to vector for processing of project mag
+                    continue;
+                }
 
+                // Place into vector
+                else
+                {
+                    double usercreditdiff = pstc - psoldtc;
+
+                    if (usercreditdiff <= 0)
+                    {
+                        printf("noo im less then 00000\n");
+                        continue;
+                    }
+
+                    dtotalcredit += usercreditdiff;
+                    processedcpids.insert(std::make_pair(pcpid, usercreditdiff));
+
+                }
+            }
+
+            // Search each row and produce a magnitude for each user
+            // We have NN multipler of 115000
+            // Whitelist count is used
+            // Total rac is used
+            std::unordered_map<std::string, double> magdata;
+
+            for (const auto& v : processedcpids)
+            {
+                double credit = v.second;
+
+                if (credit < 0)
+                {
+                    printf("ERROR LESS THEN 0 TC HOW?!?!\n");
                     return false;
                 }
+                double mag = ((credit / dtotalcredit) / (double)projectcount) * 115000;
+                //mag = Round(mag, 2);
+                if (mag == 0)
+                    continue;
 
-                for (const auto& map : tabledata)
-                {
-                    std::string pcpid = map.first;
-                    double pstc = map.second;
+                totalmagforproject += mag;
+                //                        mag = Round(mag, 2);
+                //                        mag = shave(mag, 2);
 
-                    if (pcpid.empty() || pstc == 0)
-                        continue;
+                //       printf("DEBUG: ROW %d -> cpid %s -> rac %f\n", i, cpid.c_str(), rac);
+                magdata.insert(std::make_pair(v.first, mag));
+            }
 
-                    if (pcpid.length() != 32)
-                        continue;
+            data.push_back(std::make_pair(wl.first, magdata));
 
-                    // Pull previous credit from last sb dummy contract
-                    double psoldtc = 0;
+            _log(NN, INFO, "calcmagsbyproject", "Processed Rac for Mag calcuations <project=" + wl.first + ", count=" + logstr(rowcount - 1) + ">");
 
-                    auto tcsearch = tchistorydata.find(pcpid);
-
-                    if (tcsearch != tchistorydata.end())
-                        psoldtc = tcsearch->second;
-
-                    else
-                    {
-                        // Cpid not in past sb contract
-                        // Adjust the total project credit to not offset mag calculations
-                        // Don't insert into vector to process
-                        // They will join next superblock as the total credit will be stored for the project
-
-                        continue;
-                    }
-
-                    if (pstc == psoldtc)
-                    {
-                        // No credit difference don't add to vector for processing of project mag
-                        continue;
-                    }
-
-                    // Place into vector
-                    else
-                    {
-                        double usercreditdiff = pstc - psoldtc;
-
-                        if (usercreditdiff <= 0)
-                        {
-                            printf("noo im less then 00000\n");
-                            continue;
-                        }
-
-                        dtotalcredit += usercreditdiff;
-                        processedcpids.insert(std::make_pair(pcpid, usercreditdiff));
-
-                    }
-                }
-
-                // Search each row and produce a magnitude for each user
-                // We have NN multipler of 115000
-                // Whitelist count is used
-                // Total rac is used
-                std::unordered_map<std::string, double> magdata;
-
-                for (const auto& v : processedcpids)
-                {
-                    double credit = v.second;
-
-                    if (credit < 0)
-                    {
-                        printf("ERROR LESS THEN 0 TC HOW?!?!\n");
-                        return false;
-                    }
-                    double mag = ((credit / dtotalcredit) / (double)projectcount) * 115000;
-                    //mag = Round(mag, 2);
-                    if (mag == 0)
-                        continue;
-
-                    totalmagforproject += mag;
-                    //                        mag = Round(mag, 2);
-                    //                        mag = shave(mag, 2);
-
-                    //       printf("DEBUG: ROW %d -> cpid %s -> rac %f\n", i, cpid.c_str(), rac);
-                    magdata.insert(std::make_pair(v.first, mag));
-                }
-
-                if (!db->insert_bulk_uomap("MAGNITUDES-" + wl.first, magdata))
-
-                //                    if (!db->insert_entry("MAGNITUDES-" + wl.first, v.first, std::to_string(mag)))
-                {
-                    _log(NN, ERROR, "calcmagsbyproject", "Failed to insert into database <project=" + wl.first + ">");
-
-                    db->drop_table("MAGNITUDES-" + wl.first);
-                    db->vacuum_db();
-
-                    break;
-                }
-
-                _log(NN, INFO, "calcmagsbyproject", "Processed Rac for Mag calcuations <project=" + wl.first + ", count=" + logstr(rowcount - 1) + ">");
-                //            }
-
-                //            catch (std::exception& ex)
-                //            {
-                //                _log(NN, ERROR, "calcmagsbyproject", "Exception occured; assuming project failed <project=" + wl.first + "> (" + logstr(ex.what()) + ")");
-
-                //                db->drop_table("MAGNITUDES-" + wl.first);
-                //                db->vacuum_db();
-                //            }
-
-                printf("project %s has total magnitude of %f\n", wl.first.c_str(), totalmagforproject);
-                int64_t u = time(NULL);
-                printf("%s took %" PRId64 "\n", wl.first.c_str(), u-t);
+            printf("project %s has total magnitude of %f\n", wl.first.c_str(), totalmagforproject);
+            int64_t u = time(NULL);
+            printf("%s took %" PRId64 "\n", wl.first.c_str(), u-t);
         }
+
         if (projectcount < successcount)
             _log(NN, INFO, "calcmagsbyproject", "Finished processing mags for each project; new projects will be in the superblock afterwords; <successcount=" + logstr(successcount) + ", projectswithmag=" + logstr(projectcount) + ">");
 
@@ -697,10 +677,11 @@ public:
     }
 
 
-    bool calctotalmagbycpid(nndb* db)
+    bool calctotalmagbycpid(nndb* db, const std::vector<std::pair<std::string, std::unordered_map<std::string, double>>>& data)
     {
         // Iterate beacon list and search all projects for a result of MAG and add them to make a total mag per cpid table
         double totalmag;
+        std::unordered_map<std::string, double> magnitudes;
 
         db->drop_table("MAGNITUDES");
         db->vacuum_db();
@@ -713,73 +694,52 @@ public:
 
             double cpidmag = 0;
 
-//            printf("Checking CPID %s\n", cpid.c_str());
-
             for (auto const& prj : vWhitelist)
             {
-                try
+                // Re coded
+                std::unordered_map<std::string, double> processdata;
+
+                for (const auto& d : data)
                 {
-                    std::string value;
-
-                    if (db->search_table("MAGNITUDES-" + prj.first, cpid, value))
-                    {
-                        // If CPID found in project do the math
-                        if (value.empty())
-                            continue;
-
-//                        printf("mag for prj %s is %s\n", prj.first.c_str(), value.c_str());
-//                        printf("stod value is %f\n", std::stod(value));
-                        double mag = Round(std::stod(value), 2);
-
-                        cpidmag += mag;
-                    }
+                    if (d.first == prj.first)
+                        processdata = d.second;
                 }
 
-                catch (std::exception& ex)
-                {
-                    printf("EXCEPTION %s\n", ex.what());
-                    // handle
-                }
+                // PROJECT NOT FOUND WITH MAGNITUDE DATA
+                if (processdata.empty())
+                    continue;
 
+                auto foundcpid = processdata.find(cpid);
+
+                // CPID has no mag in project
+                if (foundcpid == processdata.end())
+                    continue;
+
+                cpidmag += foundcpid->second;
             }
 
-//            if (cpidmag < 0.25)
-//            {
-//                printf("User %s has a mag less then 0.25 -> %f\n", cpid.c_str(), cpidmag);
-//                continue;
-//            }
-            //else if (cpidmag > 0.25 && cpidmag < 1)
-            //    cpidmag = 1;
+            //If Magnitude is 0 don't include for contract
+            if (cpidmag == 0)
+                continue;
 
-            if (cpidmag > 0)
-            {
-                cpidmag = Round(cpidmag, 2);
-//                if (cpidmag < 1)
-//                    _log(DB, INFO, "cpidmag", "MAg is less then 1 for cpid " + cpid + " mag " + logstr(cpidmag));
+            cpidmag = Round(cpidmag,2);
 
-//                if (cpidmag < 0.25)
-//                    continue;
+            if (cpidmag > 32766)
+                cpidmag = 32766;
 
-                if (cpidmag > 32766)
-                    cpidmag = 32766;
 
-//                if (cpidmag < 1 and cpidmag > 0.25)
-//                    cpidmag =1;
+            totalmag += cpidmag;
 
-                if (!db->insert_entry("MAGNITUDES", cpid, std::to_string(cpidmag)))
-                {
-                    _log(NN, ERROR, "cacltotalmagbycpid", "Failed to insert into database; assuming database failed <cpid=" + cpid + ">");
+            // Insert into map for bulk db write
+            magnitudes.insert(std::make_pair(cpid, cpidmag));
+        }
 
-                    return false;
-                }
+        // Now we have to bulk insert the magnitudes table into database
+        if (!db->insert_bulk_uomap("MAGNITUDES", magnitudes))
+        {
+            _log(NN, ERROR, "cacltotalmagbycpid", "Failed to insert into database; assuming database failed");
 
-          //      printf("CPID %s has total mag of %f\n", cpid.c_str(), cpidmag);
-                totalmag += cpidmag;
-            }
-
-            // If CPID has no mag; so lets save time by not placing this in database
-
-            // Success this time
+            return false;
         }
 
         printf("total mag is %f\n", totalmag);
@@ -978,43 +938,42 @@ bool nn::syncdata()
     nndb* db = new nndb;
 
     int64_t a = time(NULL);
-/*    if (!data.gatherprojectdata(db))
+    if (!data.gatherprojectdata(db))
     {
         db->vacuum_db();
 
         return false;
     }
-*/
+
     int64_t b = time(NULL);
-/*    if (!data.processprojectdata(db))
+    if (!data.processprojectdata(db))
     {
         db->vacuum_db();
 
         return false;
     }
-*/
+
 
     int64_t c = time(NULL);
 
-    if (!data.calcmagsbyproject(db))
-    {
-        db->vacuum_db();
+    std::vector<std::pair<std::string, std::unordered_map<std::string, double>>> magdata;
 
+    if (!data.calcmagsbyproject(db, magdata))
         return false;
-    }
+
     int64_t d = time(NULL);
-    /*
 
-    if (!data.calctotalmagbycpid(db))
+
+    if (!data.calctotalmagbycpid(db, magdata))
     {
         db->vacuum_db();
 
         return false;
     }
-*/
+
     db->checkpoint_db();
     printf("Tasks completed: downloads took %" PRId64 " seconds; Processing data for db took %" PRId64 " seconds; total time %" PRId64 "\n", b-a, c-b, c-a);
-    printf("Processing of mags took %" PRId64 "\n", d-c);
+    printf("Processing of mags took %" PRId64 "\n", (time(NULL) - c));
     db->vacuum_db();
 
     int64_t g = time(NULL);

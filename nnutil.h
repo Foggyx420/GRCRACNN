@@ -12,8 +12,7 @@
 #include <inttypes.h>
 #include <unordered_set>
 #include <unordered_map>
-#include <boost/endian/arithmetic.hpp>
-
+#inlcude <memory>
 namespace fs = std::experimental::filesystem;
 
 class stringbuilder

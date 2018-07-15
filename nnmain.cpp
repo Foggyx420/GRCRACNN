@@ -62,6 +62,7 @@ void setdummy()
     vWhitelist.push_back(std::make_pair("universe@home", "http://universeathome.pl/universe/@"));
     vWhitelist.push_back(std::make_pair("yafu", "http://yafu.myfirewall.org/yafu/@"));
     vWhitelist.push_back(std::make_pair("yoyo@home", "http://www.rechenkraft.net/yoyo/@"));
+    vWhitelist.push_back(std::make_pair("worldcommunitygrid", "https://download.worldcommunitygrid.org/boinc/@"));
 
     std::string tccontractfile = "dummyprojects.txt";
     std::string tcline;
@@ -208,7 +209,13 @@ public:
 
             std::size_t pos = vWL.second.find("@");
             std::string sUrl = vWL.second.substr(0, pos) + "stats/";
-            std::string sPrjFile = sUrl + "user.gz";
+            std::string sPrjFile;
+
+            if (vWL.second.find("worldcommunitygrid") != std::string::npos)
+                sPrjFile = sUrl + "user.xml.gz";
+
+            else
+                sPrjFile = sUrl + "user.gz";
 
             curl->reset();
             curl->clear();
@@ -497,6 +504,22 @@ public:
             return false;
         }
 
+        // Verify all project data exists in previous superblock
+        // If not the success count needs to be adjusted so no mag is lost.
+
+        int projectcount = 0;
+
+        for (const auto& chkwl : vWhitelist)
+        {
+            std::vector<std::string> tchistorydata = split(ExtractXML(dummycontract, "<" + chkwl.first + ">", "</" + chkwl.first + ">"), ";");
+
+            if (tchistorydata.empty())
+                continue;
+
+            else
+                projectcount++;
+        }
+
         for (const auto& wl : vWhitelist)
         {
             double totalmagforproject = 0;
@@ -506,39 +529,47 @@ public:
             // Pull history data here from dummy contract for testing ADD later on non existence handling.
             std::vector<std::string> tchistorydata = split(ExtractXML(dummycontract, "<" + wl.first + ">", "</" + wl.first + ">"), ";");
 
+            // If the results is empty then its a new project in neural network then we just bypass this part
+            // TODO figure out a way to now have a magnitude loss for the period. surely this is not the best way !
+            if (tchistorydata.empty())
+            {
+                _log(NN, INFO, "calcmagsbyproject", "Project is not in previous superblock contract; skipping and will record total credit only");
+
+                continue;
+            }
+
 //            try
 //            {
                 db->drop_table("MAGNITUDES-" + wl.first);
                 db->vacuum_db();
                 db->create_table("MAGNITUDES-" + wl.first);
 
-                double dtotalcreditold = 0;
-                double dtotalcreditnew = 0;
-                std::string stotalcredit;
+                double dtotalcredit = 0;
 
                 int rowcount = db->get_row_count(wl.first);
 
-                if (db->search_table(wl.first, "TOTAL", stotalcredit) && rowcount > 0)
-                    dtotalcreditnew = std::stod(stotalcredit);
-
-                else
+                printf("project %s and rowcount %d\n", wl.first.c_str(), rowcount);
+                if (rowcount == 0)
                 {
-                    // Failed to pull total rac so project data does not exist
-                    _log(NN, ERROR, "calcmagsbyproject", "Data for project does not exist <project=" + wl.first + ">");
+                    _log(NN, INFO, "calcmagsbyproject", "No Previous data for project; ignoring as it likely new project <project=" + wl.first + ", rowcount=" + logstr(rowcount) + ">");
 
                     continue;
                 }
+
                 // CRITICAL SECTION
                 // A New beacon will have a new total credit but the last superblock will not have that data to calculate a mag
                 // Thus the total project credit needs to be changed to reflect that as to not throw off mag calculations considerably
                 // This must be done first and not on the fly
                 // DB work is fast thou gonna do this in a vector
-                std::vector<std::pair<std::string, std::pair<std::string, std::string>>> processedcpids;
+                std::vector<std::pair<std::string, double>> processedcpids;
 
                 for (int i = 1; i < rowcount; i++)
                 {
                     std::string pcpid;
                     std::string pstc;
+
+                    if (wl.first == "worldcommunitygrid")
+                        printf("Searching row %d\n", i);
 
                     if (db->search_raw_table(wl.first, i, pcpid, pstc))
                     {
@@ -557,7 +588,6 @@ public:
                             // Adjust the total project credit to not offset mag calculations
                             // Don't insert into vector to process
                             // They will join next superblock as the total credit will be stored for the project
-                            dtotalcreditnew -= std::stod(pstc);
 
                             continue;
                         }
@@ -572,7 +602,18 @@ public:
 
                             // Place into vector
                             else
-                                processedcpids.push_back(std::make_pair(pcpid, std::make_pair(psoldtc, pstc)));
+                            {
+                                double usercreditdiff = std::stod(pstc) - std::stod(psoldtc);
+
+                                if (usercreditdiff <= 0)
+                                {
+                                    printf("noo im less then 00000\n");
+                                    continue;
+                                }
+                                dtotalcredit += usercreditdiff;
+
+                                processedcpids.push_back(std::make_pair(pcpid, usercreditdiff));
+                            }
                         }
                     }
 
@@ -585,29 +626,24 @@ public:
 
                 }
 
-                // Add better handling here
-                std::string prevtotalcred = ExtractValueFromVector(tchistorydata, "TOTAL");
-                printf("prevtotalcred = %s\n", prevtotalcred.c_str());
-                if (!prevtotalcred.empty())
-                    dtotalcreditold = std::stod(prevtotalcred);
-
-                else
-                    return false;
-
-                double ddifftotalcred = dtotalcreditnew - dtotalcreditold;
                 // Search each row and produce a magnitude for each user
                 // We have NN multipler of 115000
                 // Whitelist count is used
                 // Total rac is used
                 for (const auto& v : processedcpids)
                 {
-                    double oldtc = std::stod(v.second.first);
-                    double tc = std::stod(v.second.second) - oldtc;
+                    double credit = v.second;
 
-                    if (tc < 0)
+                    if (credit < 0)
+                    {
                         printf("ERROR LESS THEN 0 TC HOW?!?!\n");
+                        return false;
+                    }
+                    double mag = ((credit / dtotalcredit) / (double)projectcount) * 115000;
+                    //mag = Round(mag, 2);
+                    if (mag == 0)
+                        continue;
 
-                    double mag = ((tc / ddifftotalcred) / (double)successcount) * 115000;
                     totalmagforproject += mag;
                     //                        mag = Round(mag, 2);
                     //                        mag = shave(mag, 2);
@@ -641,6 +677,11 @@ public:
                 int64_t u = time(NULL);
                 printf("%s took %" PRId64 "\n", wl.first.c_str(), u-t);
         }
+        if (projectcount < successcount)
+            _log(NN, INFO, "calcmagsbyproject", "Finished processing mags for each project; new projects will be in the superblock afterwords; <successcount=" + logstr(successcount) + ", projectswithmag=" + logstr(projectcount) + ">");
+
+        else
+            _log(NN, INFO, "calcmagsbyproject", "Finished calculating mags for each project");
 
         return true;
     }
@@ -692,11 +733,13 @@ public:
 
             }
 
-            if (cpidmag < 0.25)
-                continue;
-
-            else if (cpidmag > 0.25 && cpidmag < 1)
-                cpidmag = 1;
+//            if (cpidmag < 0.25)
+//            {
+//                printf("User %s has a mag less then 0.25 -> %f\n", cpid.c_str(), cpidmag);
+//                continue;
+//            }
+            //else if (cpidmag > 0.25 && cpidmag < 1)
+            //    cpidmag = 1;
 
             if (cpidmag > 0)
             {
@@ -704,8 +747,8 @@ public:
 //                if (cpidmag < 1)
 //                    _log(DB, INFO, "cpidmag", "MAg is less then 1 for cpid " + cpid + " mag " + logstr(cpidmag));
 
-                if (cpidmag < 0.25)
-                    continue;
+//                if (cpidmag < 0.25)
+//                    continue;
 
                 if (cpidmag > 32766)
                     cpidmag = 32766;
@@ -982,7 +1025,7 @@ bool nn::syncdata()
     sbcontract->cxml("SBV2");
 
     int64_t h = time(NULL);
-    printf("Contract is %s\n", tccontract.c_str());
+    printf("Contract is %s\n", sbcontract->value().c_str());
     printf("contract creation took %" PRId64 "\n", h-g);
 //    printf("Contract is sized %zu\n", tccontract.size());
 //    printf("SB contract is %s\n", sbcontract->value().c_str());

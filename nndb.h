@@ -269,6 +269,75 @@ public:
         return false;
     }
 
+    std::unordered_map<std::string, double> table_to_uomap(const std::string& table)
+    {
+        std::unordered_map<std::string, double> uomap;
+
+        if (!dbopen)
+            if (!reopen_db())
+                return uomap;
+
+        if (table.empty())
+        {
+            _log(DB, ERROR, "search_table", "Parameters cannot be empty; <table=" + table + ">");
+
+            return uomap;
+        }
+
+        // Return empty uomap if table don't exist
+        if (this->get_row_count(table) == 0)
+            return uomap;
+
+        std::string query = "SELECT key, value FROM '" + table + "';";
+
+        sqlite3_prepare_v2(db, query.c_str(), query.size(), &stmt, NULL);
+
+        try
+        {
+            while(true)
+            {
+                int stat = sqlite3_step(stmt);
+
+                if (stat == SQLITE_ROW)
+                {
+                    std::string key = (const char*)sqlite3_column_text(stmt, 0);
+                    std::string value = std::stod((const char*)sqlite3_column_text(stmt, 1));
+
+                    uomap.insert(std::make_pair(key, value));
+
+                    continue;
+                }
+
+                if (stat == SQLITE_DONE)
+                {
+                    sqlite3_finalize(stmt);
+
+                    return uomap;
+                }
+
+                if (stat != SQLITE_DONE && stat != SQLITE_ROW)
+                {
+                    // Some problem occured, clear map and send back empty map
+                    sqlite3_finalize(stmt);
+
+                    uomap.erase(uomap.begin(), uomap.end());
+
+                    return uomap;
+                }
+            }
+        }
+
+        catch (std::bad_cast &ex)
+        {
+            _log(DB, DEBUG, "search_table", "Cast exception for <table=" + table + ", query=" + query + "> (" + ex.what() + ")");
+        }
+
+        sqlite3_finalize(stmt);
+
+        return uomap;
+
+    }
+
     int get_row_count(const std::string& table)
     {
         if (!dbopen)

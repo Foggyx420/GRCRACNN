@@ -24,8 +24,6 @@
 * Network Node Database *
 ************************/
 
-typedef std::shared_ptr<nndb> nndbPtr;
-
 class nndb
 {
 private:

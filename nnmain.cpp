@@ -12,6 +12,8 @@
 #include <stdexcept>
 #include <zlib.h>
 
+// Pointers
+typedef std::shared_ptr<nndb> nndbPtr;
 // Move once porting to gridcoin
 double ExtractValueFromVector(const std::vector<std::string>& data, const std::string& key);
 
@@ -196,7 +198,7 @@ public:
         }
     }
 
-    bool gatherprojectdata(nndb* db)
+    bool gatherprojectdata(nndbPtr& db)
     {
         // Must have 90% success rate to make a contract
         int nRequired = std::floor((double)vWhitelist.size() * 0.9);
@@ -298,6 +300,8 @@ public:
             }
         }
 
+        delete curl;
+
         if (nSuccess < nRequired)
         {
             _log(NN, ERROR, "gatherprojectdata", "Failed to retrieve required amount of projects <Successcount=" + std::to_string(nSuccess) + ", Requiredcount=" + std::to_string(nRequired) + ", whitelistcount=" + std::to_string(vWhitelist.size()) + ">");
@@ -308,7 +312,7 @@ public:
         return true;
     }
 
-    bool processprojectdata(nndb* db)
+    bool processprojectdata(nndbPtr& db)
     {
         // Must have 90% success rate to make a contract
         int nRequired = std::floor((double)vWhitelist.size() * 0.9);
@@ -364,7 +368,7 @@ public:
         }
     }
 
-    bool importprojectdata(nndb* db, const std::string& project, bool& critical)
+    bool importprojectdata(nndbPtr& db, const std::string& project, bool& critical)
     {
         critical = false;
 
@@ -433,24 +437,26 @@ public:
                     if (line == "</users>")
                     {
                         bcomplete = true;
+                        in.reset();
+                        input_file.close();
                         printf("Complete\n");
                         break;
                     }
 
                     if (line == "<user>")
                     {
-                        stringbuilder* ud = new stringbuilder;
+                        stringbuilder ud;
 
                         while (std::getline(in, line))
                         {
                             if (line == "</user>")
                                 break;
 
-                            ud->append(line);
+                            ud.append(line);
                         }
 
-                        std::string cpid = ExtractXML(ud->value(), "<cpid>", "</cpid>");
-                        std::string tc = ExtractXML(ud->value(), "<total_credit>", "</total_credit>");
+                        std::string cpid = ExtractXML(ud.value(), "<cpid>", "</cpid>");
+                        std::string tc = ExtractXML(ud.value(), "<total_credit>", "</total_credit>");
 
                         if (cpid.empty() || tc.empty())
                             continue;
@@ -680,7 +686,7 @@ public:
     bool calctotalmagbycpid(nndb* db, const std::vector<std::pair<std::string, std::unordered_map<std::string, double>>>& data)
     {
         // Iterate beacon list and search all projects for a result of MAG and add them to make a total mag per cpid table
-        double totalmag;
+        double totalmag = 0;
         std::unordered_map<std::string, double> magnitudes;
 
         db->drop_table("MAGNITUDES");
@@ -834,6 +840,7 @@ public:
 
         catch (std::exception& ex)
         {
+            // Put exception message here
             return "";
         }
 
@@ -858,9 +865,9 @@ public:
             return "";
         }
 
-        stringbuilder* dummycontract = new stringbuilder;
+        stringbuilder dummycontract;
 
-        dummycontract->oxml("PROJECTS");
+        dummycontract.oxml("PROJECTS");
 
         for (const auto& wl : vWhitelist)
         {
@@ -868,7 +875,7 @@ public:
             printf("*%s\n", wl.first.c_str());
 
             // Conform in future to all one case for nn
-            dummycontract->oxml(wl.first);
+            dummycontract.oxml(wl.first);
 
             try
             {
@@ -890,10 +897,10 @@ public:
                         if (cpid.length() != 32 && cpid != "TOTAL")
                             continue;
 
-                        dummycontract->append(cpid);
-                        dummycontract->comma();
-                        dummycontract->append(stc);
-                        dummycontract->semicolon();
+                        dummycontract.append(cpid);
+                        dummycontract.comma();
+                        dummycontract.append(stc);
+                        dummycontract.semicolon();
                     }
 
                     else
@@ -910,12 +917,12 @@ public:
                 // exception
             }
 
-            dummycontract->cxml(wl.first);
+            dummycontract.cxml(wl.first);
         }
 
-        dummycontract->cxml("PROJECTS");
+        dummycontract.cxml("PROJECTS");
 
-        return dummycontract->value();
+        return dummycontract.value();
     }
 };
 
@@ -926,6 +933,7 @@ bool nn::isnnparticipant()
     return true;
 }
 
+
 bool nn::syncdata()
 {
     nndata data;
@@ -935,7 +943,8 @@ bool nn::syncdata()
 
     setdummy();
 
-    nndb* db = new nndb;
+    nndbPtr db = std::make_shared<nndb>();
+
 
     int64_t a = time(NULL);
     if (!data.gatherprojectdata(db))
@@ -952,7 +961,7 @@ bool nn::syncdata()
 
         return false;
     }
-
+/*
 
     int64_t c = time(NULL);
 
@@ -978,7 +987,7 @@ bool nn::syncdata()
 
     int64_t g = time(NULL);
 /*
-    stringbuilder* sbcontract = new stringbuilder;
+    stringbuilder sbcontract;
 
     std::string contract = data.contract(db);
 
@@ -988,17 +997,17 @@ bool nn::syncdata()
     }
 
     std::string tccontract = data.builddummycontract(db);
-    sbcontract->oxml("SBV2");
-    sbcontract->append(contract);
-    sbcontract->append(tccontract);
-    sbcontract->cxml("SBV2");
+    sbcontract.oxml("SBV2");
+    sbcontract.append(contract);
+    sbcontract.append(tccontract);
+    sbcontract.cxml("SBV2");
 
     int64_t h = time(NULL);
-    printf("Contract is %s\n", sbcontract->value().c_str());
+    printf("Contract is %s\n", sbcontract.value().c_str());
     printf("contract creation took %" PRId64 "\n", h-g);
 //    printf("Contract is sized %zu\n", tccontract.size());
 //    printf("SB contract is %s\n", sbcontract->value().c_str());
-//    printf("SB contract size is %zu\n", sbcontract->size());
+//    printf("SB contract size is %zu\n", sbcontract.size());
 */
     return true;
 }

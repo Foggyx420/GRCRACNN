@@ -476,6 +476,9 @@ public:
                 }
 
                 // Incomplete files or problems can put us here.
+                in.reset();
+                input_file.close();
+
                 if (!bcomplete)
                     return false;
             }
@@ -503,7 +506,7 @@ public:
         return true;
     }
 
-    bool calcmagsbyproject(nndb* db, std::vector<std::pair<std::string, std::unordered_map<std::string, double>>>& data)
+    bool calcmagsbyproject(nndbPtr& db, std::vector<std::pair<std::string, std::unordered_map<std::string, double>>>& data)
     {
         // Iterate each project for said cpid and calculate the magnitude for each user. db contains the total credit and last sb contains previous total credit
         int successcount = 0;
@@ -683,7 +686,7 @@ public:
     }
 
 
-    bool calctotalmagbycpid(nndb* db, const std::vector<std::pair<std::string, std::unordered_map<std::string, double>>>& data)
+    bool calctotalmagbycpid(nndbPtr& db, const std::vector<std::pair<std::string, std::unordered_map<std::string, double>>>& data)
     {
         // Iterate beacon list and search all projects for a result of MAG and add them to make a total mag per cpid table
         double totalmag = 0;
@@ -754,7 +757,7 @@ public:
         return true;
     }
 
-    std::string contract(nndb* db)
+    std::string contract(nndbPtr& db)
     {
         // Verify we have enough projects synced to be able to make a contract
         // This currently stored in DB however i'd like to remove that manipulation chance
@@ -847,7 +850,7 @@ public:
         return contract.value();
     }
 
-    std::string builddummycontract(nndb* db)
+    std::string builddummycontract(nndbPtr& db)
     {
         // Iterate each project TC file for said cpid and store the TC for each user in a project contract. db contains the total credit
         int successcount = 0;
@@ -961,7 +964,7 @@ bool nn::syncdata()
 
         return false;
     }
-/*
+
 
     int64_t c = time(NULL);
 
@@ -981,12 +984,12 @@ bool nn::syncdata()
     }
 
     db->checkpoint_db();
-    printf("Tasks completed: downloads took %" PRId64 " seconds; Processing data for db took %" PRId64 " seconds; total time %" PRId64 "\n", b-a, c-b, c-a);
-    printf("Processing of mags took %" PRId64 "\n", (time(NULL) - c));
+//    printf("Tasks completed: downloads took %" PRId64 " seconds; Processing data for db took %" PRId64 " seconds; total time %" PRId64 "\n", b-a, c-b, c-a);
+//    printf("Processing of mags took %" PRId64 "\n", (time(NULL) - c));
     db->vacuum_db();
 
     int64_t g = time(NULL);
-/*
+
     stringbuilder sbcontract;
 
     std::string contract = data.contract(db);
@@ -1008,7 +1011,7 @@ bool nn::syncdata()
 //    printf("Contract is sized %zu\n", tccontract.size());
 //    printf("SB contract is %s\n", sbcontract->value().c_str());
 //    printf("SB contract size is %zu\n", sbcontract.size());
-*/
+
     return true;
 }
 

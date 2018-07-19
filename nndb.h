@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <vector>
 #include <cstring>
-#include "../Gridcoin-Research/src/contract/superblock.h"
+//#include "../Gridcoin-Research/src/contract/superblock.h"
 /* Conform to a basic layout for maximum camptiablility while keeping functions short and sweet
  * We will store by type with two values
  *
@@ -28,31 +28,23 @@ class nndb
 {
 private:
 
-    // Vars
     bool dbopen = false;
     sqlite3* db = nullptr;
     const char* z = NULL;
     int res = 0;
     sqlite3_stmt* stmt = nullptr;
     std::string nndbfile = "nn.db";
-    bool dbbusy = false;
     char* err = NULL;
     char* tail = NULL;
 
-    // Functions
-/*    static int callback(void *count, int argc, char **argv, char **azColName) {
-        int *c = count;
-
-        *c = atoi(argv[0]);
-
-        return 0;
-    }
-*/
     void open_db()
     {
-        if (!dbopen && db != nullptr)
-            db == nullptr;
+        if (dbopen)
+        {
+            _log(DB, INFO, "open_db", "Function called but database is already open!");
 
+            return;
+        }
         bool exists = false;
 
         if (fs::exists(nndbfile.c_str()))
@@ -72,14 +64,15 @@ private:
         dbopen = true;
 
         if (!exists)
-            settings_db();
+            this->settings_db();
 
-        startup_db();
+        this->startup_db();
     }
 
     void close_db()
     {
-        vacuum_db();
+        this->vacuum_db();
+        this->checkpoint_db();
 
         res = sqlite3_close_v2(db);
 
@@ -91,8 +84,10 @@ private:
         else
         {
             db = nullptr;
+            stmt = nullptr;
 
             dbopen = false;
+
         }
     }
 
@@ -102,9 +97,9 @@ private:
         // If db is closed for whatever reason lets reopen it
         _log(DB, WARNING, "reopen_db", "Database is being requested to be reopened");
 
-        open_db();
+        this->open_db();
 
-        if (isopen_db())
+        if (this->isopen_db())
         {
             _log(DB, INFO, "reopen_db", "Successfully reopened database");
 
@@ -173,7 +168,7 @@ public:
     void vacuum_db()
     {
         if (!dbopen)
-            if (!reopen_db())
+            if (!this->reopen_db())
                 return;
 
         _log(DB, INFO, "vacuum_db", "Vacuum of database has been requested");
@@ -193,7 +188,7 @@ public:
     void checkpoint_db()
     {
         if (!dbopen)
-            if (!reopen_db())
+            if (!this->reopen_db())
                 return;
 
         int walframeesize;
@@ -218,7 +213,7 @@ public:
     void create_table(const std::string& table)
     {
         if (!dbopen)
-            if (!reopen_db())
+            if (!this->reopen_db())
                 return;
 
         std::string query = "CREATE TABLE IF NOT EXISTS '" + table  + "' (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);";
@@ -233,7 +228,7 @@ public:
     bool search_table(const std::string& table, const std::string& key, std::string& value, bool emptyok = false)
     {
         if (!dbopen)
-            if (!reopen_db())
+            if (!this->reopen_db())
                 return false;
 
         if (table.empty() || key.empty())
@@ -274,7 +269,7 @@ public:
         std::unordered_map<std::string, double> uomap;
 
         if (!dbopen)
-            if (!reopen_db())
+            if (!this->reopen_db())
                 return uomap;
 
         if (table.empty())
@@ -342,7 +337,7 @@ public:
     int get_row_count(const std::string& table)
     {
         if (!dbopen)
-            if (!reopen_db())
+            if (!this->reopen_db())
                 return false;
 
         if (table.empty())
@@ -384,7 +379,7 @@ public:
     bool search_raw_table(const std::string& table, int row, std::string& key, std::string& value)
     {
         if (!dbopen)
-            if (!reopen_db())
+            if (!this->reopen_db())
                 return false;
 
         if (table.empty() || row == 0)
@@ -425,7 +420,7 @@ public:
     void drop_table(const std::string& table)
     {
         if (!dbopen)
-            if (!reopen_db())
+            if (!this->reopen_db())
                 return;
 
         if (table.empty())
@@ -442,13 +437,13 @@ public:
         sqlite3_step(stmt);
         sqlite3_finalize(stmt);
 
-        vacuum_db();
+        this->vacuum_db();
     }
 
     bool insert_entry(const std::string& table, const std::string& key, const std::string& value)
     {
         if (!dbopen)
-            if (!reopen_db())
+            if (!this->reopen_db())
                 return false;
 
         if (table.empty() || key.empty() || value.empty())
@@ -479,7 +474,7 @@ public:
     bool insert_bulk_uomap(const std::string table, const std::unordered_map<std::string, double>& data)
     {
         if (!dbopen)
-            if (!reopen_db())
+            if (!this->reopen_db())
                 return false;
 
         if (table.empty() || data.empty())
@@ -527,7 +522,7 @@ public:
     void delete_entry(const std::string& table, const std::string& key)
     {
         if (!dbopen)
-            if (!reopen_db())
+            if (!this->reopen_db())
                 return;
 
         if (table.empty() || key.empty())

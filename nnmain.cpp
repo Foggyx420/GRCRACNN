@@ -1015,4 +1015,9 @@ bool nn::syncdata()
     return true;
 }
 
-// Regular functions
+// Futures Tests here
+
+void nn::mocktest()
+{
+    bMockTest = true;
+}

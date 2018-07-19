@@ -15,6 +15,9 @@
 #include <memory>
 namespace fs = std::experimental::filesystem;
 
+// Testing?
+bool bMockTest = false;
+
 class stringbuilder
 {
 protected:

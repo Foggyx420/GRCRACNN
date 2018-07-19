@@ -13,6 +13,7 @@ public:
     bool syncdata();
     bool isnnparticipant();
 
+    void mocktest();
 private:
 };
 

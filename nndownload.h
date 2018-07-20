@@ -42,7 +42,10 @@ public:
     ~nncurl()
     {
         if (curl)
+        {
             curl_easy_cleanup(curl);
+            curl_global_cleanup();
+        }
     }
 
     void reset()
@@ -184,6 +187,8 @@ public:
         res = curl_easy_perform(curl);
 
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+        curl_slist_free_all(headers);
 
         if (res)
         {
